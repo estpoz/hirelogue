@@ -1,61 +1,60 @@
-//
-//  ContentView.swift
-//  Hirelogue
-//
-//  Created by Heidy Mudita Sutedjo on 21/08/26.
-//
-
 import SwiftUI
-import SwiftData
 
 struct ContentView: View {
-    @Environment(\.modelContext) private var modelContext
-    @Query private var items: [Item]
+    @State private var viewModel = InterviewSessionViewModel()
+    @State private var path: [AppRoute] = []
+    @State private var isShowingSplash = true
 
     var body: some View {
-        NavigationSplitView {
-            List {
-                ForEach(items) { item in
-                    NavigationLink {
-                        Text("Item at \(item.timestamp, format: Date.FormatStyle(date: .numeric, time: .standard))")
-                    } label: {
-                        Text(item.timestamp, format: Date.FormatStyle(date: .numeric, time: .standard))
+        ZStack {
+            NavigationStack(path: $path) {
+                HomeJobInputView(viewModel: viewModel) {
+                    path = [.setup]
+                }
+                .navigationDestination(for: AppRoute.self) { route in
+                    switch route {
+                    case .setup:
+                        InterviewSetupView(
+                            viewModel: viewModel,
+                            onStartInterview: { path.append(.session) },
+                            onGoHome: { path = [] }
+                        )
+                    case .session:
+                        InterviewSessionView(
+                            viewModel: viewModel,
+                            onShowFeedback: { showFeedback() },
+                            onGoHome: { path = [] }
+                        )
+                    case .feedback:
+                        InterviewFeedbackView(
+                            viewModel: viewModel,
+                            onPractiseAgain: { path = [.setup] },
+                            onBackToHome: { path = [] }
+                        )
                     }
                 }
-                .onDelete(perform: deleteItems)
             }
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    EditButton()
-                }
-                ToolbarItem {
-                    Button(action: addItem) {
-                        Label("Add Item", systemImage: "plus")
-                    }
-                }
+
+            if isShowingSplash {
+                SplashScreenView()
+                    .transition(.opacity)
+                    .zIndex(1)
             }
-        } detail: {
-            Text("Select an item")
+        }
+        .task {
+            try? await Task.sleep(nanoseconds: 1_700_000_000)
+            withAnimation(.easeOut(duration: 0.35)) {
+                isShowingSplash = false
+            }
         }
     }
 
-    private func addItem() {
-        withAnimation {
-            let newItem = Item(timestamp: Date())
-            modelContext.insert(newItem)
-        }
-    }
-
-    private func deleteItems(offsets: IndexSet) {
-        withAnimation {
-            for index in offsets {
-                modelContext.delete(items[index])
-            }
-        }
+    private func showFeedback() {
+        guard path.last != .feedback else { return }
+        path.append(.feedback)
     }
 }
 
 #Preview {
     ContentView()
-        .modelContainer(for: Item.self, inMemory: true)
 }
