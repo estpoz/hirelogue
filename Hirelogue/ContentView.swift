@@ -1,9 +1,19 @@
 import SwiftUI
 
+/// Root coordinator for app-wide session state and NavigationStack routing.
 struct ContentView: View {
+    // MARK: - State
+
+    /// Shared MVVM source of truth passed into each screen.
     @State private var viewModel = InterviewSessionViewModel()
+
+    /// Stack path for the single linear interview flow.
     @State private var path: [AppRoute] = []
+
+    /// Controls the custom animated splash overlay shown on launch.
     @State private var isShowingSplash = true
+
+    // MARK: - Body
 
     var body: some View {
         ZStack {
@@ -49,6 +59,9 @@ struct ContentView: View {
         }
     }
 
+    // MARK: - Navigation Helpers
+
+    /// Pushes feedback once, even if the mock finish signal fires more than once.
     private func showFeedback() {
         guard path.last != .feedback else { return }
         path.append(.feedback)

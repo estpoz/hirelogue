@@ -1,9 +1,16 @@
 import SwiftUI
 
+/// First screen in the flow: collects the job opening and starts mock analysis.
 struct HomeJobInputView: View {
+    // MARK: - Dependencies
+
     @Environment(\.colorScheme) private var colorScheme
     @Bindable var viewModel: InterviewSessionViewModel
+
+    /// Called by the root coordinator after mock analysis completes.
     let onAnalysisComplete: () -> Void
+
+    // MARK: - Body
 
     var body: some View {
         ScreenContainer {
@@ -67,6 +74,9 @@ struct HomeJobInputView: View {
         }
     }
 
+    // MARK: - Job Input
+
+    /// Multiline job-opening editor with example-fill support.
     private var jobOpeningEditor: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .lastTextBaseline) {
@@ -115,6 +125,9 @@ struct HomeJobInputView: View {
         .padding(.horizontal, 16)
     }
 
+    // MARK: - Loading Overlay
+
+    /// Blocks the screen while the prototype simulates job-opening analysis.
     private var analyzingOverlay: some View {
         ZStack {
             Color.black.opacity(0.18)

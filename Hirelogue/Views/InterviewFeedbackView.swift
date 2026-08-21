@@ -1,9 +1,18 @@
 import SwiftUI
 
+/// Final screen that renders structured mock interview feedback.
 struct InterviewFeedbackView: View {
+    // MARK: - Dependencies
+
     @Bindable var viewModel: InterviewSessionViewModel
+
+    /// Returns to setup while preserving the analyzed job profile.
     let onPractiseAgain: () -> Void
+
+    /// Resets the whole flow and returns to Home.
     let onBackToHome: () -> Void
+
+    // MARK: - Body
 
     var body: some View {
         ScreenContainer {
@@ -67,6 +76,9 @@ struct InterviewFeedbackView: View {
         }
     }
 
+    // MARK: - Feedback Sections
+
+    /// Summary card combines completion status, interview config, and overall feedback.
     private func summaryCard(profile: JobProfile) -> some View {
         FeedbackCard("Interview Complete") {
             VStack(spacing: 10) {
@@ -87,6 +99,7 @@ struct InterviewFeedbackView: View {
         }
     }
 
+    /// Technical and behavioral competencies assessed by the mock feedback.
     private var competenciesCard: some View {
         FeedbackCard("Competencies assessed", caption: "Based on the job profile and what your answers covered.") {
             VStack(alignment: .leading, spacing: 14) {
@@ -105,6 +118,7 @@ struct InterviewFeedbackView: View {
         }
     }
 
+    /// Positive feedback points that the candidate should preserve.
     private var strengthsCard: some View {
         FeedbackCard("Strengths demonstrated") {
             VStack(alignment: .leading, spacing: 14) {
@@ -115,6 +129,7 @@ struct InterviewFeedbackView: View {
         }
     }
 
+    /// Actionable feedback points for the next practice run.
     private var improvementsCard: some View {
         FeedbackCard("Areas to improve") {
             VStack(alignment: .leading, spacing: 14) {
@@ -125,6 +140,7 @@ struct InterviewFeedbackView: View {
         }
     }
 
+    /// STAR structure breakdown for one behavioral answer.
     private var starCard: some View {
         FeedbackCard("Answer structure", caption: "Behavioral question: \(viewModel.feedback.starQuestion)") {
             VStack(alignment: .leading, spacing: 10) {
@@ -153,6 +169,7 @@ struct InterviewFeedbackView: View {
         }
     }
 
+    /// Notes about clarity of technical decision-making.
     private var technicalReasoningCard: some View {
         FeedbackCard("Technical reasoning", caption: "How clearly you explained your technical decisions.") {
             VStack(alignment: .leading, spacing: 10) {
@@ -169,6 +186,7 @@ struct InterviewFeedbackView: View {
         }
     }
 
+    /// Example of a more structured answer for one technical question.
     private var improvedAnswerCard: some View {
         FeedbackCard("Suggested improvement", caption: "Example formulation - \(viewModel.feedback.improvedAnswerQuestion)") {
             VStack(alignment: .leading, spacing: 8) {
@@ -187,6 +205,7 @@ struct InterviewFeedbackView: View {
         }
     }
 
+    /// Ordered list of what the user should practise next.
     private var practiceAreasCard: some View {
         FeedbackCard("Recommended practice areas") {
             VStack(alignment: .leading, spacing: 12) {

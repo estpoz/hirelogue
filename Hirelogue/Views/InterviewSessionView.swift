@@ -1,12 +1,26 @@
 import SwiftUI
 
+/// Simulated voice-interview screen.
+///
+/// This view intentionally shows no transcript. It visualizes future speaking,
+/// listening, pause, processing, and finished states using view-model timers.
 struct InterviewSessionView: View {
+    // MARK: - Dependencies
+
     @Bindable var viewModel: InterviewSessionViewModel
+
+    /// Called when the interview ends naturally or through the confirmation dialog.
     let onShowFeedback: () -> Void
+
+    /// Called only for the fallback empty state.
     let onGoHome: () -> Void
+
+    // MARK: - Local UI State
 
     @State private var showEndConfirmation = false
     @State private var showDemoControls = false
+
+    // MARK: - Body
 
     var body: some View {
         ScreenContainer {
@@ -49,6 +63,9 @@ struct InterviewSessionView: View {
         }
     }
 
+    // MARK: - Header
+
+    /// Fixed top status bar with progress, remaining time, and the protected End action.
     private var header: some View {
         VStack(spacing: 10) {
             HStack(alignment: .center) {
@@ -81,6 +98,9 @@ struct InterviewSessionView: View {
         }
     }
 
+    // MARK: - Center Stage
+
+    /// Main interview state presentation. The question is visible only while "speaking".
     private var centerStage: some View {
         ScrollView {
             VStack(spacing: 22) {
@@ -121,6 +141,7 @@ struct InterviewSessionView: View {
         }
     }
 
+    /// Card for the current interviewer question or follow-up prompt.
     private var questionCard: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("\(viewModel.isFollowUp ? "Follow-up question" : "Question \(viewModel.questionIndex + 1)") - \(viewModel.currentQuestion.competency)")
@@ -141,6 +162,9 @@ struct InterviewSessionView: View {
         }
     }
 
+    // MARK: - Footer
+
+    /// Bottom progress bar and prototype-only controls for manually testing phases.
     private var footer: some View {
         VStack(alignment: .leading, spacing: 10) {
             QuestionProgressView(

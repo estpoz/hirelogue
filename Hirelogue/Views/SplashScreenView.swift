@@ -1,8 +1,13 @@
 import SwiftUI
 
+/// Launch overlay that shows the branded logo before revealing the app flow.
 struct SplashScreenView: View {
+    // MARK: - State
+
     @Environment(\.colorScheme) private var colorScheme
     @State private var isAnimating = false
+
+    // MARK: - Body
 
     var body: some View {
         ZStack {

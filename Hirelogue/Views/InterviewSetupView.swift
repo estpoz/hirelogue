@@ -1,14 +1,25 @@
 import SwiftUI
 
+/// Lets the user review the mock job profile and configure the practice interview.
 struct InterviewSetupView: View {
+    // MARK: - Dependencies
+
     @Bindable var viewModel: InterviewSessionViewModel
+
+    /// Called after microphone permission is granted and the mock session starts.
     let onStartInterview: () -> Void
+
+    /// Called when setup is opened without a prepared job profile.
     let onGoHome: () -> Void
+
+    // MARK: - Local UI State
 
     @State private var isEditingProfile = false
     @State private var isMicrophoneDeniedAlertPresented = false
     @State private var draftPosition = ""
     @State private var draftSeniority = ""
+
+    // MARK: - Body
 
     var body: some View {
         ScreenContainer {
@@ -104,6 +115,9 @@ struct InterviewSetupView: View {
         }
     }
 
+    // MARK: - Configuration Sections
+
+    /// Segmented selector for the style of questions to ask.
     private var interviewTypeSection: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("Interview type")
@@ -121,6 +135,7 @@ struct InterviewSetupView: View {
         .padding(.horizontal, 16)
     }
 
+    /// Duration picker rendered as native tappable rows.
     private var durationSection: some View {
         GroupedCard("Interview duration") {
             ForEach(Array(InterviewDuration.allCases.enumerated()), id: \.element.id) { index, duration in
@@ -150,6 +165,9 @@ struct InterviewSetupView: View {
         }
     }
 
+    // MARK: - Edit Profile Sheet
+
+    /// Small editing surface for the two top-level profile fields.
     private var editProfileSheet: some View {
         NavigationStack {
             Form {
@@ -177,12 +195,16 @@ struct InterviewSetupView: View {
         .presentationDetents([.medium])
     }
 
+    // MARK: - Actions
+
+    /// Seeds the sheet with the current profile values before presenting it.
     private func openEditor(with profile: JobProfile) {
         draftPosition = profile.position
         draftSeniority = profile.seniority
         isEditingProfile = true
     }
 
+    /// Gates the interview behind system microphone permission.
     private func startInterviewAfterPermission() async {
         let isGranted = await viewModel.requestMicrophonePermission()
         guard isGranted else {

@@ -1,5 +1,8 @@
 import SwiftUI
 
+// MARK: - Screen and Action Containers
+
+/// Full-screen wrapper that applies the app's grouped background.
 struct ScreenContainer<Content: View>: View {
     let content: Content
 
@@ -14,6 +17,7 @@ struct ScreenContainer<Content: View>: View {
     }
 }
 
+/// Bottom button area used for primary actions that should stay reachable.
 struct BottomActionArea<Content: View>: View {
     let content: Content
 
@@ -36,6 +40,9 @@ struct BottomActionArea<Content: View>: View {
     }
 }
 
+// MARK: - Grouped Content
+
+/// iOS-style grouped section with an optional heading, trailing control, and footer.
 struct GroupedCard<Content: View>: View {
     let title: String?
     let footer: String?
@@ -92,6 +99,7 @@ struct GroupedCard<Content: View>: View {
     }
 }
 
+/// Two-column row for label/value information inside a grouped card.
 struct InfoRow: View {
     let label: String
     let value: String
@@ -112,6 +120,7 @@ struct InfoRow: View {
     }
 }
 
+/// Vertical bullet list used for responsibilities and qualifications.
 struct BulletListView: View {
     let items: [String]
 
@@ -133,6 +142,9 @@ struct BulletListView: View {
     }
 }
 
+// MARK: - Tags and Progress
+
+/// Pill-style competency label with optional assessment note and remove action.
 struct CompetencyTag: View {
     let label: String
     var note: String?
@@ -174,6 +186,7 @@ struct CompetencyTag: View {
     }
 }
 
+/// Wrapping collection of editable competency tags.
 struct TagCloud: View {
     let tags: [String]
     var muted = false
@@ -191,6 +204,7 @@ struct TagCloud: View {
     }
 }
 
+/// Wrapping collection of read-only feedback competency assessments.
 struct AssessmentTagCloud: View {
     let assessments: [CompetencyAssessment]
 
@@ -207,6 +221,7 @@ struct AssessmentTagCloud: View {
     }
 }
 
+/// Segmented progress bar for the current interview question.
 struct QuestionProgressView: View {
     let total: Int
     let current: Int
@@ -233,6 +248,9 @@ struct QuestionProgressView: View {
     }
 }
 
+// MARK: - Interview State Indicator
+
+/// Circular visual indicator for the current mock interview phase.
 struct InterviewPhaseIndicator: View {
     let phase: InterviewPhase
     let countdown: Int
@@ -282,6 +300,7 @@ struct InterviewPhaseIndicator: View {
         .accessibilityLabel(phase.title)
     }
 
+    /// Icon or progress content displayed inside the circular phase indicator.
     @ViewBuilder
     private var indicatorContent: some View {
         switch phase {
@@ -312,6 +331,7 @@ struct InterviewPhaseIndicator: View {
         }
     }
 
+    /// Semantic tint for each phase.
     private var indicatorColor: Color {
         switch phase {
         case .speaking, .processing:
@@ -324,6 +344,9 @@ struct InterviewPhaseIndicator: View {
     }
 }
 
+// MARK: - Feedback Components
+
+/// Reusable feedback card with a title, optional caption, and custom body.
 struct FeedbackCard<Content: View>: View {
     let title: String
     let caption: String?
@@ -360,6 +383,7 @@ struct FeedbackCard<Content: View>: View {
     }
 }
 
+/// One feedback row with a configurable status symbol.
 struct FeedbackPointRow: View {
     let point: FeedbackPoint
     var symbol = "checkmark.circle.fill"
@@ -384,6 +408,9 @@ struct FeedbackPointRow: View {
     }
 }
 
+// MARK: - Empty States
+
+/// Generic empty-state view with an icon, message, and recovery action.
 struct EmptyStateView: View {
     let title: String
     let message: String
@@ -410,15 +437,20 @@ struct EmptyStateView: View {
     }
 }
 
+// MARK: - Layout Helpers
+
+/// Simple wrapping layout used by competency tag collections.
 struct FlowLayout: Layout {
     var spacing: CGFloat = 8
 
+    /// Measures the height needed after wrapping subviews into rows.
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
         let maxWidth = proposal.width ?? 0
         let rows = rows(in: maxWidth, subviews: subviews)
         return CGSize(width: maxWidth, height: rows.reduce(0) { $0 + $1.height } + CGFloat(max(rows.count - 1, 0)) * spacing)
     }
 
+    /// Places each row left-to-right, then moves down by the tallest item in that row.
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
         let rows = rows(in: bounds.width, subviews: subviews)
         var y = bounds.minY
@@ -437,6 +469,7 @@ struct FlowLayout: Layout {
         }
     }
 
+    /// Groups subviews into rows based on the available width.
     private func rows(in maxWidth: CGFloat, subviews: Subviews) -> [FlowRow] {
         var rows: [FlowRow] = []
         var currentItems: [FlowItem] = []
@@ -467,12 +500,144 @@ struct FlowLayout: Layout {
     }
 }
 
+/// Internal row representation used by FlowLayout placement.
 private struct FlowRow {
     let items: [FlowItem]
     let height: CGFloat
 }
 
+/// Internal measured item representation used by FlowLayout placement.
 private struct FlowItem {
     let index: Int
     let size: CGSize
+}
+
+// MARK: - Component Previews
+
+#Preview("Grouped Components") {
+    ScreenContainer {
+        ScrollView {
+            VStack(spacing: 18) {
+                GroupedCard(
+                    "Job profile",
+                    footer: "This mirrors the extracted job profile section.",
+                    trailing: AnyView(Button("Edit") {})
+                ) {
+                    InfoRow(label: "Position", value: "iOS Developer")
+                    Divider().padding(.leading, 16)
+                    InfoRow(label: "Seniority", value: "Mid-level")
+                }
+
+                GroupedCard("Responsibilities") {
+                    BulletListView(items: [
+                        "Build SwiftUI features for a consumer banking app",
+                        "Collaborate with backend engineers on REST APIs",
+                        "Improve reliability with unit and UI tests"
+                    ])
+                }
+            }
+            .padding(.vertical, 20)
+        }
+    }
+}
+
+#Preview("Tags and Progress") {
+    ScreenContainer {
+        VStack(alignment: .leading, spacing: 24) {
+            GroupedCard("Competencies") {
+                TagCloud(tags: [
+                    "Swift",
+                    "SwiftUI",
+                    "Concurrency",
+                    "Testing",
+                    "Performance"
+                ]) { _ in }
+            }
+
+            FeedbackCard("Assessment Tags") {
+                AssessmentTagCloud(assessments: [
+                    CompetencyAssessment(name: "SwiftUI", note: "Clearly explained"),
+                    CompetencyAssessment(name: "Concurrency", note: "Partly explained"),
+                    CompetencyAssessment(name: "Testing", note: "Not covered")
+                ])
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Interview progress")
+                    .font(.headline)
+                QuestionProgressView(total: 5, current: 3)
+            }
+            .padding(.horizontal, 16)
+        }
+        .padding(.vertical, 20)
+    }
+}
+
+#Preview("Interview States") {
+    ScreenContainer {
+        ScrollView {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 140), spacing: 16)], spacing: 18) {
+                ForEach(InterviewPhase.allCases) { phase in
+                    VStack(spacing: 8) {
+                        InterviewPhaseIndicator(phase: phase, countdown: 2)
+                        Text(phase.title)
+                            .font(.caption.weight(.semibold))
+                            .multilineTextAlignment(.center)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+                    .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                }
+            }
+            .padding(16)
+        }
+    }
+}
+
+#Preview("Feedback Components") {
+    ScreenContainer {
+        ScrollView {
+            VStack(spacing: 16) {
+                FeedbackCard("Strengths demonstrated", caption: "How feedback points render with detail text.") {
+                    VStack(alignment: .leading, spacing: 14) {
+                        FeedbackPointRow(
+                            point: FeedbackPoint(
+                                point: "You named specific technical decisions.",
+                                detail: "You explained when SwiftUI was a better fit and why UIKit stayed in one flow."
+                            )
+                        )
+                        FeedbackPointRow(
+                            point: FeedbackPoint(
+                                point: "The testing example needs more detail.",
+                                detail: "Add what the test caught and how it reduced release risk."
+                            ),
+                            symbol: "exclamationmark.circle.fill",
+                            tint: .orange
+                        )
+                    }
+                }
+
+                BottomActionArea {
+                    Button("Primary Action") {}
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.large)
+                    Button("Secondary Action") {}
+                        .buttonStyle(.bordered)
+                        .controlSize(.large)
+                }
+            }
+            .padding(.vertical, 20)
+        }
+    }
+}
+
+#Preview("Empty State") {
+    ScreenContainer {
+        EmptyStateView(
+            title: "No job profile yet",
+            message: "Paste a job opening on the home screen to prepare an interview.",
+            actionTitle: "Go to Home",
+            action: {}
+        )
+    }
 }

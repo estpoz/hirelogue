@@ -1,4 +1,11 @@
+/// Central location for static prototype data.
+///
+/// Replace these fixtures when the app starts using real job analysis, generated
+/// interview questions, and generated feedback.
 enum MockHirelogueData {
+    // MARK: - Job Opening Input
+
+    /// Complete sample opening used by the Home screen's "Use Example" action.
     static let exampleJobOpening = """
     iOS Developer (Mid-Level) - Nordic Fintech Group, Amsterdam (Hybrid)
 
@@ -26,6 +33,9 @@ enum MockHirelogueData {
     - Exposure to App Store release management and phased rollouts
     """
 
+    // MARK: - Mock Analysis Result
+
+    /// Pretend extracted profile returned after the simulated analysis step.
     static let jobProfile = JobProfile(
         position: "iOS Developer",
         seniority: "Mid-level (3-5 years)",
@@ -68,6 +78,9 @@ enum MockHirelogueData {
         ]
     )
 
+    // MARK: - Mock Interview Questions
+
+    /// Ordered question plan used by the simulated interview state machine.
     static let questions: [InterviewQuestion] = [
         InterviewQuestion(
             id: "q1",
@@ -106,6 +119,9 @@ enum MockHirelogueData {
         )
     ]
 
+    // MARK: - Mock Feedback
+
+    /// Structured practice feedback shown after the mock interview completes.
     static let feedback = InterviewFeedback(
         summary: "You gave concrete, well-paced answers and were strongest when describing architecture decisions you made yourself. Behavioral answers often ended before the result, and two technical answers stayed at a high level. This is practice feedback only; it does not predict a hiring outcome.",
         technicalCompetencies: [
