@@ -36,6 +36,10 @@ struct InterviewSetupView: View {
                                 .padding(.horizontal, 20)
                                 .padding(.top, 16)
 
+                            if let analysisErrorMessage = viewModel.analysisErrorMessage {
+                                fallbackNotice(message: analysisErrorMessage)
+                            }
+
                             GroupedCard(
                                 "Job profile",
                                 trailing: AnyView(Button("Edit") { openEditor(with: profile) }.font(.subheadline.weight(.semibold)))
@@ -137,6 +141,23 @@ struct InterviewSetupView: View {
     }
 
     // MARK: - Configuration Sections
+
+    /// Explains when extracted setup data is coming from the prototype fallback instead of Foundation Models.
+    private func fallbackNotice(message: String) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.orange)
+                .padding(.top, 2)
+            Text(message)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.orange.opacity(0.10), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .padding(.horizontal, 16)
+    }
 
     /// Segmented selector for the style of questions to ask.
     private var interviewTypeSection: some View {

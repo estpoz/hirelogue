@@ -24,6 +24,10 @@ final class InterviewSessionViewModel {
 
     var isAnalyzing = false
     var analysisProgress = 0.0
+    /// Status text shown while the async analyzer prepares a profile.
+    var analysisStatusMessage = "Identifying the role, qualifications, and interview competencies."
+    /// Non-nil when the app had to use prototype fallback data instead of a Foundation Models result.
+    var analysisErrorMessage: String?
     var isRequestingMicrophonePermission = false
 
     // MARK: - Interview Session State
@@ -41,14 +45,29 @@ final class InterviewSessionViewModel {
     let questions = MockHirelogueData.questions
     let feedback = MockHirelogueData.feedback
 
+    // MARK: - Services
+
+    /// Primary analyzer used by Home. Injected so tests/previews can provide deterministic services later.
+    @ObservationIgnored private let jobAnalysisService: any JobAnalysisService
+    /// Keeps the prototype usable on devices where Apple Intelligence is unavailable.
+    @ObservationIgnored private let fallbackJobAnalysisService: any JobAnalysisService
+
     // MARK: - Internal Tasks
 
-    /// Unstructured tasks drive short prototype delays and must be cancelled
+    /// Unstructured tasks drive analysis and short prototype delays and must be cancelled
     /// when the user restarts, exits, or jumps between demo states.
     @ObservationIgnored private var analysisTask: Task<Void, Never>?
     @ObservationIgnored private var phaseTask: Task<Void, Never>?
     @ObservationIgnored private var countdownTask: Task<Void, Never>?
     @ObservationIgnored private var remainingTimeTask: Task<Void, Never>?
+
+    init(
+        jobAnalysisService: any JobAnalysisService = FoundationModelJobAnalysisService(),
+        fallbackJobAnalysisService: any JobAnalysisService = MockJobAnalysisService()
+    ) {
+        self.jobAnalysisService = jobAnalysisService
+        self.fallbackJobAnalysisService = fallbackJobAnalysisService
+    }
 
     // MARK: - Derived Display State
 
@@ -90,35 +109,52 @@ final class InterviewSessionViewModel {
         jobOpening = MockHirelogueData.exampleJobOpening
     }
 
-    /// Simulates analysis progress, then installs the mock job profile.
+    /// Extracts a job profile with Foundation Models, falling back to mock data if unavailable.
     func analyzeJobOpening(onComplete: @escaping () -> Void) {
         guard canAnalyze else { return }
-        analysisTask?.cancel()
+//        analysisTask?.cancel()
         isAnalyzing = true
         analysisProgress = 0
+        analysisErrorMessage = nil
+        analysisStatusMessage = "Preparing the job opening for analysis."
 
+        let opening = jobOpening
         analysisTask = Task { [weak self] in
             guard let self else { return }
-            let steps: [(UInt64, Double)] = [
-                (400_000_000, 0.25),
-                (500_000_000, 0.55),
-                (500_000_000, 0.80),
-                (500_000_000, 1.00)
-            ]
 
-            for step in steps {
-                try? await Task.sleep(nanoseconds: step.0)
-                guard !Task.isCancelled else { return }
-                analysisProgress = step.1
-            }
-
-            try? await Task.sleep(nanoseconds: 300_000_000)
+            try? await Task.sleep(nanoseconds: 250_000_000)
             guard !Task.isCancelled else { return }
-            jobProfile = MockHirelogueData.jobProfile
-            completed = false
-            isAnalyzing = false
-            onComplete()
+            analysisProgress = 0.25
+            analysisStatusMessage = "Extracting the role and seniority."
+
+            do {
+                let profile = try await jobAnalysisService.analyze(jobOpening: opening)
+                guard !Task.isCancelled else { return }
+                analysisProgress = 0.85
+                analysisStatusMessage = "Organizing responsibilities, qualifications, and competencies."
+                try? await Task.sleep(nanoseconds: 250_000_000)
+                guard !Task.isCancelled else { return }
+                finishAnalysis(with: profile, onComplete: onComplete)
+            } catch {
+                guard !Task.isCancelled else { return }
+                analysisErrorMessage = error.localizedDescription
+                analysisStatusMessage = "Using prototype fallback data because Foundation Models could not complete analysis."
+                let fallbackProfile = (try? await fallbackJobAnalysisService.analyze(jobOpening: opening)) ?? MockHirelogueData.jobProfile
+                guard !Task.isCancelled else { return }
+                try? await Task.sleep(nanoseconds: 350_000_000)
+                guard !Task.isCancelled else { return }
+                finishAnalysis(with: fallbackProfile, onComplete: onComplete)
+            }
         }
+    }
+
+    /// Commits the analyzed profile and lets the root coordinator navigate to setup.
+    private func finishAnalysis(with profile: JobProfile, onComplete: @escaping () -> Void) {
+        jobProfile = profile
+        completed = false
+        analysisProgress = 1
+        isAnalyzing = false
+        onComplete()
     }
 
     // MARK: - Setup Actions
@@ -236,6 +272,8 @@ final class InterviewSessionViewModel {
         duration = .ten
         isAnalyzing = false
         analysisProgress = 0
+        analysisStatusMessage = "Identifying the role, qualifications, and interview competencies."
+        analysisErrorMessage = nil
         phase = .speaking
         questionIndex = 0
         isFollowUp = false
