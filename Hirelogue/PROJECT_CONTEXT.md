@@ -15,10 +15,17 @@ The intended final flow is:
 
 ## Current Milestone
 
-This project is currently an app-base prototype. It uses native SwiftUI screens, mock data, and simulated interview states.
+This project is currently an app-base prototype with the first real AI integration added for job-opening analysis.
 
-Do not assume real AI or speech features exist yet. The app currently does not implement:
-- Foundation Models analysis
+The app now implements:
+- Foundation Models job-profile extraction for pasted job openings.
+- Guided generation into a structured `GeneratedJobProfile`, then mapping into the app's `JobProfile` domain model.
+- A deterministic mock fallback when Foundation Models is unavailable, not linked, or fails generation.
+- UI status messaging during analysis and a setup-screen fallback notice.
+
+The app still does not implement:
+- Foundation Models interview-plan generation
+- Foundation Models answer analysis or final feedback generation
 - Speech recognition
 - Live transcription
 - Microphone capture
@@ -36,9 +43,10 @@ The app uses a simple MVVM structure:
 - `Components/`: reusable SwiftUI UI pieces.
 - `Models/`: one file per domain model or enum.
 - `ViewModels/`: observable app/session state.
-- `Mock/`: static fixture data used by the prototype.
+- `Services/`: narrow service boundaries for real app capabilities, starting with job-opening analysis.
+- `Mock/`: static fixture data used by the prototype and fallback paths.
 
-The main source of truth is `InterviewSessionViewModel`. Views render state from this view model and call its methods for user actions.
+The main source of truth is `InterviewSessionViewModel`. Views render state from this view model and call its methods for user actions. Real AI work should stay behind service protocols rather than being embedded directly in views.
 
 ## Navigation Flow
 
@@ -66,15 +74,17 @@ Rules:
 1. `HomeJobInputView` writes job-opening text into `InterviewSessionViewModel.jobOpening`.
 2. `Use Example` fills `jobOpening` from `MockHirelogueData.exampleJobOpening`.
 3. `Analyze Job Opening` calls `analyzeJobOpening(onComplete:)`.
-4. The view model simulates progress and sets `jobProfile` to `MockHirelogueData.jobProfile`.
-5. `ContentView` navigates to `.setup`.
-6. `InterviewSetupView` reads and edits `jobProfile`, `interviewType`, and `duration`.
-7. `Start Interview` calls `requestMicrophonePermission()`.
-8. If permission is granted, `startInterview()` resets session state and starts timers.
-9. `InterviewSessionView` renders `phase`, question progress, remaining time, and current question.
-10. When the mock interview finishes, the view model sets `shouldShowFeedback = true`.
-11. `InterviewSessionView` calls `onShowFeedback`, and `ContentView` navigates to `.feedback`.
-12. `InterviewFeedbackView` renders `MockHirelogueData.feedback` through the view model.
+4. The view model updates analysis progress/status and calls `JobAnalysisService`.
+5. `FoundationModelJobAnalysisService` checks `SystemLanguageModel.default.availability`, uses guided generation to extract a structured profile, and maps it into `JobProfile`.
+6. If Foundation Models is unavailable or generation fails, `MockJobAnalysisService` supplies `MockHirelogueData.jobProfile` and `analysisErrorMessage` is shown on setup.
+7. The view model sets `jobProfile`, then `ContentView` navigates to `.setup`.
+8. `InterviewSetupView` reads and edits `jobProfile`, `interviewType`, and `duration`.
+9. `Start Interview` calls `requestMicrophonePermission()`.
+10. If permission is granted, `startInterview()` resets session state and starts timers.
+11. `InterviewSessionView` renders `phase`, question progress, remaining time, and current question.
+12. When the mock interview finishes, the view model sets `shouldShowFeedback = true`.
+13. `InterviewSessionView` calls `onShowFeedback`, and `ContentView` navigates to `.feedback`.
+14. `InterviewFeedbackView` renders `MockHirelogueData.feedback` through the view model.
 
 ## Major Files
 
@@ -134,16 +144,26 @@ Rules:
 - `InterviewSessionViewModel.swift`
   - Main observable state holder.
   - Uses Swift Observation with `@Observable`.
-  - Owns job input, mock profile, configuration, permission state, interview state, timers, completion state, and feedback fixtures.
-  - Simulates job analysis and interview phase transitions.
+  - Owns job input, extracted profile, configuration, permission state, interview state, timers, completion state, and feedback fixtures.
+  - Calls `JobAnalysisService` for job-profile extraction and falls back to mock data when needed.
+  - Simulates interview phase transitions.
   - Calls `AVAudioApplication.requestRecordPermission()` for microphone permission.
+
+### Services
+
+- `JobAnalysisService.swift`
+  - Defines the `JobAnalysisService` protocol.
+  - Implements `FoundationModelJobAnalysisService` for on-device Foundation Models job-profile extraction.
+  - Uses guided generation with `@Generable` and `@Guide` to produce structured analysis output.
+  - Maps generated output into the existing `JobProfile` model.
+  - Implements `MockJobAnalysisService` as a deterministic fallback.
 
 ### Mock Data
 
 - `MockHirelogueData.swift`
   - Contains all static prototype data.
-  - Includes example job opening, mock extracted job profile, mock interview questions, and mock structured feedback.
-  - Replace this when real Foundation Models analysis/generation is introduced.
+  - Includes example job opening, fallback job profile, mock interview questions, and mock structured feedback.
+  - Keep this as fallback data until each real AI/speech capability has its own reliable implementation.
 
 ### Models
 
@@ -203,28 +223,35 @@ When continuing development:
 
 - Keep code SwiftUI-native.
 - Keep one file per model.
-- Avoid adding real AI or audio capture unless the milestone explicitly asks for it.
+- Keep real AI/audio/speech functionality behind service boundaries.
+- Do not add audio capture, speech recognition, speech synthesis, live transcription, generated interview plans, answer analysis, or generated feedback unless the milestone explicitly asks for it.
 - Do not show a live transcript unless explicitly requested.
 - Prefer adding service types before expanding `InterviewSessionViewModel` too much.
 - Keep `InterviewSessionViewModel` as the single source of truth until there is a real reason to split it.
 - Preserve the app's simple linear navigation flow unless the product scope changes.
 - Build after changes with Xcode.
 
-## Suggested Future Service Boundaries
+## Service Boundaries
 
-When real functionality is added, consider introducing:
+Current service:
+
+```text
+Services/
+  JobAnalysisService.swift
+```
+
+Suggested future service boundaries:
 
 ```text
 Services/
   MicrophonePermissionService.swift
-  JobAnalysisService.swift
   InterviewQuestionService.swift
   FeedbackService.swift
   SpeechRecognitionService.swift
   SpeechSynthesisService.swift
 ```
 
-Do not add these early unless they remove real complexity.
+Do not add future services early unless they remove real complexity.
 
 ## Verification Checklist for Future Changes
 

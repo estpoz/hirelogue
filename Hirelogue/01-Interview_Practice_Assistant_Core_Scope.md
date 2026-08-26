@@ -13,8 +13,9 @@ The application is intended as a practice tool. Its feedback does not predict em
 ## 2. Primary Apple Technologies
 
 - **Foundation Models:** Extracts the job profile, prepares the interview plan, generates adaptive questions and follow-up questions, analyzes answers, and produces final feedback.
-- **SpeechAnalyzer:** Transcribes the user's spoken answers internally during the interview.
-- **SpeechDetector:** Detects speech and silence to support automatic turn-taking.
+- **SpeechAnalyzer:** Manages speech analysis sessions and accepts audio input for speech modules.
+- **SpeechTranscriber:** Transcribes the user's spoken answers internally during the interview.
+- **SpeechDetector:** Provides voice activity detection to help gate transcription; deterministic Swift logic owns the turn-taking thresholds and countdown behavior.
 - **AVSpeechSynthesizer:** Presents the AI interviewer's questions through spoken audio.
 - **AVAudioEngine:** Captures microphone input for transcription.
 - **SwiftUI:** Provides the application interface and represents the interview-session state.
