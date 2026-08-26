@@ -30,7 +30,7 @@ struct HomeJobInputView: View {
 
                         jobOpeningEditor
 
-                        Text("Hirelogue is a practice tool. It does not evaluate your chances of being hired.")
+                        Text("Hirelogue is a practice tool. It does not guarantee your chances of being hired.")
                             .font(.footnote)
                             .foregroundStyle(.tertiary)
                             .padding(.horizontal, 20)
@@ -104,7 +104,7 @@ struct HomeJobInputView: View {
                     .font(.body)
                     .scrollContentBackground(.hidden)
                     .padding(10)
-                    .frame(minHeight: 260)
+                    .frame(height: 260)
                     .accessibilityLabel("Job opening")
 
                 if viewModel.jobOpening.isEmpty {
@@ -116,6 +116,7 @@ struct HomeJobInputView: View {
                         .allowsHitTesting(false)
                 }
             }
+            .frame(height: 260)
 
             Text("The job opening will be analyzed with mock data for this app-base milestone.")
                 .font(.footnote)

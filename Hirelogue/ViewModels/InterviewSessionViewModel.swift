@@ -133,6 +133,16 @@ final class InterviewSessionViewModel {
         jobProfile = profile
     }
 
+    /// Replaces the editable profile list sections with non-empty trimmed entries.
+    func updateProfileList(_ keyPath: WritableKeyPath<JobProfile, [String]>, items: [String]) {
+        guard var profile = jobProfile else { return }
+        let trimmedItems = items
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        profile[keyPath: keyPath] = trimmedItems
+        jobProfile = profile
+    }
+
     /// Removes one technical competency from the editable mock profile.
     func removeTechnicalCompetency(_ competency: String) {
         guard var profile = jobProfile else { return }

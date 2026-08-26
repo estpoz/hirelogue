@@ -18,6 +18,8 @@ struct InterviewSetupView: View {
     @State private var isMicrophoneDeniedAlertPresented = false
     @State private var draftPosition = ""
     @State private var draftSeniority = ""
+    @State private var editingListSection: EditableListSection?
+    @State private var draftListText = ""
 
     // MARK: - Body
 
@@ -43,25 +45,41 @@ struct InterviewSetupView: View {
                                 InfoRow(label: "Seniority", value: profile.seniority)
                             }
 
-                            GroupedCard("Key responsibilities") {
+                            GroupedCard(
+                                "Key responsibilities",
+                                trailing: AnyView(editButton(for: .responsibilities, profile: profile))
+                            ) {
                                 BulletListView(items: profile.responsibilities)
                             }
 
-                            GroupedCard("Required qualifications") {
+                            GroupedCard(
+                                "Required qualifications",
+                                trailing: AnyView(editButton(for: .requiredQualifications, profile: profile))
+                            ) {
                                 BulletListView(items: profile.requiredQualifications)
                             }
 
-                            GroupedCard("Preferred qualifications") {
+                            GroupedCard(
+                                "Preferred qualifications",
+                                trailing: AnyView(editButton(for: .preferredQualifications, profile: profile))
+                            ) {
                                 BulletListView(items: profile.preferredQualifications)
                             }
 
-                            GroupedCard("Technical competencies", footer: "Remove anything that does not apply to the role you are practising for.") {
+                            GroupedCard(
+                                "Technical competencies",
+                                footer: "Remove anything that does not apply to the role you are practising for.",
+                                trailing: AnyView(editButton(for: .technicalCompetencies, profile: profile))
+                            ) {
                                 TagCloud(tags: profile.technicalCompetencies) { tag in
                                     viewModel.removeTechnicalCompetency(tag)
                                 }
                             }
 
-                            GroupedCard("Behavioral competencies") {
+                            GroupedCard(
+                                "Behavioral competencies",
+                                trailing: AnyView(editButton(for: .behavioralCompetencies, profile: profile))
+                            ) {
                                 TagCloud(tags: profile.behavioralCompetencies, muted: true) { tag in
                                     viewModel.removeBehavioralCompetency(tag)
                                 }
@@ -96,6 +114,9 @@ struct InterviewSetupView: View {
                 .navigationBarTitleDisplayMode(.inline)
                 .sheet(isPresented: $isEditingProfile) {
                     editProfileSheet
+                }
+                .sheet(item: $editingListSection) { section in
+                    editListSheet(for: section)
                 }
                 .alert("Microphone Access Needed", isPresented: $isMicrophoneDeniedAlertPresented) {
                     Button("OK", role: .cancel) {}
@@ -165,6 +186,13 @@ struct InterviewSetupView: View {
         }
     }
 
+    private func editButton(for section: EditableListSection, profile: JobProfile) -> some View {
+        Button("Edit") {
+            openListEditor(for: section, profile: profile)
+        }
+        .font(.subheadline.weight(.semibold))
+    }
+
     // MARK: - Edit Profile Sheet
 
     /// Small editing surface for the two top-level profile fields.
@@ -195,6 +223,35 @@ struct InterviewSetupView: View {
         .presentationDetents([.medium])
     }
 
+    private func editListSheet(for section: EditableListSection) -> some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextEditor(text: $draftListText)
+                        .font(.body)
+                        .frame(minHeight: 220)
+                        .accessibilityLabel(section.title)
+                } footer: {
+                    Text("Enter one item per line.")
+                }
+
+                Section {
+                    Button("Save Changes") {
+                        saveListEditor(for: section)
+                    }
+                }
+            }
+            .navigationTitle("Edit \(section.title)")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { editingListSection = nil }
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+    }
+
     // MARK: - Actions
 
     /// Seeds the sheet with the current profile values before presenting it.
@@ -202,6 +259,17 @@ struct InterviewSetupView: View {
         draftPosition = profile.position
         draftSeniority = profile.seniority
         isEditingProfile = true
+    }
+
+    private func openListEditor(for section: EditableListSection, profile: JobProfile) {
+        draftListText = section.items(in: profile).joined(separator: "\n")
+        editingListSection = section
+    }
+
+    private func saveListEditor(for section: EditableListSection) {
+        let items = draftListText.components(separatedBy: .newlines)
+        viewModel.updateProfileList(section.keyPath, items: items)
+        editingListSection = nil
     }
 
     /// Gates the interview behind system microphone permission.
@@ -214,6 +282,50 @@ struct InterviewSetupView: View {
 
         viewModel.startInterview()
         onStartInterview()
+    }
+}
+
+private enum EditableListSection: String, Identifiable {
+    case responsibilities
+    case requiredQualifications
+    case preferredQualifications
+    case technicalCompetencies
+    case behavioralCompetencies
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .responsibilities:
+            return "Key Responsibilities"
+        case .requiredQualifications:
+            return "Required Qualifications"
+        case .preferredQualifications:
+            return "Preferred Qualifications"
+        case .technicalCompetencies:
+            return "Technical Competencies"
+        case .behavioralCompetencies:
+            return "Behavioral Competencies"
+        }
+    }
+
+    var keyPath: WritableKeyPath<JobProfile, [String]> {
+        switch self {
+        case .responsibilities:
+            return \.responsibilities
+        case .requiredQualifications:
+            return \.requiredQualifications
+        case .preferredQualifications:
+            return \.preferredQualifications
+        case .technicalCompetencies:
+            return \.technicalCompetencies
+        case .behavioralCompetencies:
+            return \.behavioralCompetencies
+        }
+    }
+
+    func items(in profile: JobProfile) -> [String] {
+        profile[keyPath: keyPath]
     }
 }
 

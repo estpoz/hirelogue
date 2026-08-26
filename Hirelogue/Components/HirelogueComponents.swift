@@ -30,8 +30,7 @@ struct BottomActionArea<Content: View>: View {
             content
         }
         .padding(.horizontal, 16)
-        .padding(.top, 12)
-        .padding(.bottom, 12)
+        .padding(.vertical, 12)
         .frame(maxWidth: .infinity)
         .background(.regularMaterial)
         .overlay(alignment: .top) {
@@ -148,18 +147,34 @@ struct BulletListView: View {
 struct CompetencyTag: View {
     let label: String
     var note: String?
+    var symbol: String?
+    var tint: Color?
     var muted = false
     var onRemove: (() -> Void)?
 
-    init(label: String, note: String? = nil, muted: Bool = false, onRemove: (() -> Void)? = nil) {
+    init(
+        label: String,
+        note: String? = nil,
+        symbol: String? = nil,
+        tint: Color? = nil,
+        muted: Bool = false,
+        onRemove: (() -> Void)? = nil
+    ) {
         self.label = label
         self.note = note
+        self.symbol = symbol
+        self.tint = tint
         self.muted = muted
         self.onRemove = onRemove
     }
 
     var body: some View {
         HStack(spacing: 6) {
+            if let symbol {
+                Image(systemName: symbol)
+                    .imageScale(.small)
+            }
+
             VStack(alignment: .leading, spacing: 1) {
                 Text(label)
                     .font(.footnote.weight(.semibold))
@@ -181,8 +196,22 @@ struct CompetencyTag: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 7)
-        .foregroundStyle(muted ? Color.secondary : Color.accentColor)
-        .background((muted ? Color(.systemGray5) : Color.accentColor.opacity(0.12)), in: Capsule())
+        .foregroundStyle(tagTint)
+        .background(tagBackground, in: Capsule())
+    }
+
+    private var tagTint: Color {
+        if let tint {
+            return tint
+        }
+        return muted ? Color.secondary : Color.accentColor
+    }
+
+    private var tagBackground: Color {
+        if let tint {
+            return tint.opacity(0.12)
+        }
+        return muted ? Color(.systemGray5) : Color.accentColor.opacity(0.12)
     }
 }
 
@@ -214,9 +243,37 @@ struct AssessmentTagCloud: View {
                 CompetencyTag(
                     label: assessment.name,
                     note: assessment.note,
+                    symbol: symbol(for: assessment),
+                    tint: tint(for: assessment),
                     muted: assessment.note == "Not covered"
                 )
             }
+        }
+    }
+
+    private func symbol(for assessment: CompetencyAssessment) -> String {
+        switch assessment.note {
+        case "Clearly explained":
+            return "checkmark.circle.fill"
+        case "Partly explained":
+            return "exclamationmark.circle.fill"
+        case "Not covered":
+            return "minus.circle.fill"
+        default:
+            return "info.circle.fill"
+        }
+    }
+
+    private func tint(for assessment: CompetencyAssessment) -> Color {
+        switch assessment.note {
+        case "Clearly explained":
+            return .green
+        case "Partly explained":
+            return .orange
+        case "Not covered":
+            return .secondary
+        default:
+            return .accentColor
         }
     }
 }
