@@ -40,6 +40,10 @@ struct InterviewSetupView: View {
                                 fallbackNotice(message: analysisErrorMessage)
                             }
 
+                            if let questionGenerationErrorMessage = viewModel.questionGenerationErrorMessage {
+                                fallbackNotice(message: questionGenerationErrorMessage)
+                            }
+
                             GroupedCard(
                                 "Job profile",
                                 trailing: AnyView(Button("Edit") { openEditor(with: profile) }.font(.subheadline.weight(.semibold)))
@@ -101,7 +105,10 @@ struct InterviewSetupView: View {
                                 await startInterviewAfterPermission()
                             }
                         } label: {
-                            if viewModel.isRequestingMicrophonePermission {
+                            if viewModel.isGeneratingInterviewQuestions {
+                                Label("Generating Questions...", systemImage: "sparkles")
+                                    .frame(maxWidth: .infinity)
+                            } else if viewModel.isRequestingMicrophonePermission {
                                 Label("Requesting Microphone...", systemImage: "mic.circle")
                                     .frame(maxWidth: .infinity)
                             } else {
@@ -111,7 +118,7 @@ struct InterviewSetupView: View {
                         }
                         .buttonStyle(.borderedProminent)
                         .controlSize(.large)
-                        .disabled(viewModel.isRequestingMicrophonePermission)
+                        .disabled(viewModel.isPreparingInterviewStart)
                     }
                 }
                 .navigationTitle("Interview Setup")
@@ -293,8 +300,11 @@ struct InterviewSetupView: View {
         editingListSection = nil
     }
 
-    /// Gates the interview behind system microphone permission.
+    /// Generates the question plan from the edited setup profile, then gates the session behind microphone permission.
     private func startInterviewAfterPermission() async {
+        let didGenerateQuestions = await viewModel.generateInterviewQuestionsForCurrentProfile()
+        guard didGenerateQuestions else { return }
+
         let isGranted = await viewModel.requestMicrophonePermission()
         guard isGranted else {
             isMicrophoneDeniedAlertPresented = true

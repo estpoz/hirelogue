@@ -15,23 +15,24 @@ The intended final flow is:
 
 ## Current Milestone
 
-This project is currently an app-base prototype with the first real AI integration added for job-opening analysis.
+This project is currently an app-base prototype with focused real integrations for job-opening analysis, interview-question generation, and spoken interviewer prompts.
 
 The app now implements:
 - Foundation Models job-profile extraction for pasted job openings.
-- Guided generation into a structured `GeneratedJobProfile`, then mapping into the app's `JobProfile` domain model.
+- Foundation Models primary interview-question generation from the user-confirmed, edited `JobProfile`.
+- Guided generation into structured Swift types, then mapping into the app's domain models.
 - A deterministic mock fallback when Foundation Models is unavailable, not linked, or fails generation.
-- UI status messaging during analysis and a setup-screen fallback notice.
+- UI status messaging during analysis/question generation and setup-screen fallback notices.
+- AVSpeechSynthesizer playback for interviewer questions during the session's speaking phase.
 
 The app still does not implement:
-- Foundation Models interview-plan generation
+- Foundation Models follow-up generation from transcribed answers
 - Foundation Models answer analysis or final feedback generation
 - Speech recognition
 - Live transcription
 - Microphone capture
 - Audio recording
 - AVAudioEngine processing
-- Speech synthesis
 
 The app does request microphone permission before starting the mock interview because the final product will be voice-based.
 
@@ -79,12 +80,16 @@ Rules:
 6. If Foundation Models is unavailable or generation fails, `MockJobAnalysisService` supplies `MockHirelogueData.jobProfile` and `analysisErrorMessage` is shown on setup.
 7. The view model sets `jobProfile`, then `ContentView` navigates to `.setup`.
 8. `InterviewSetupView` reads and edits `jobProfile`, `interviewType`, and `duration`.
-9. `Start Interview` calls `requestMicrophonePermission()`.
-10. If permission is granted, `startInterview()` resets session state and starts timers.
-11. `InterviewSessionView` renders `phase`, question progress, remaining time, and current question.
-12. When the mock interview finishes, the view model sets `shouldShowFeedback = true`.
-13. `InterviewSessionView` calls `onShowFeedback`, and `ContentView` navigates to `.feedback`.
-14. `InterviewFeedbackView` renders `MockHirelogueData.feedback` through the view model.
+9. `Start Interview` calls `generateInterviewQuestionsForCurrentProfile()`.
+10. `FoundationModelInterviewQuestionService` generates primary questions from the edited profile, selected type, and selected duration.
+11. Generated questions are stored in `InterviewSessionViewModel.questions` and printed to the Xcode console.
+12. `Start Interview` calls `requestMicrophonePermission()`.
+13. If permission is granted, `startInterview()` resets session state and starts timers.
+14. `InterviewSessionView` renders `phase`, question progress, remaining time, and current question.
+15. During `.speaking`, `SpeechSynthesisService` speaks `currentQuestionText` aloud and then advances to `.listening`.
+16. When the mock interview finishes, the view model sets `shouldShowFeedback = true`.
+17. `InterviewSessionView` calls `onShowFeedback`, and `ContentView` navigates to `.feedback`.
+18. `InterviewFeedbackView` renders `MockHirelogueData.feedback` through the view model.
 
 ## Major Files
 
@@ -144,9 +149,11 @@ Rules:
 - `InterviewSessionViewModel.swift`
   - Main observable state holder.
   - Uses Swift Observation with `@Observable`.
-  - Owns job input, extracted profile, configuration, permission state, interview state, timers, completion state, and feedback fixtures.
+  - Owns job input, extracted profile, generated questions, configuration, permission state, interview state, timers, completion state, and feedback fixtures.
   - Calls `JobAnalysisService` for job-profile extraction and falls back to mock data when needed.
-  - Simulates interview phase transitions.
+  - Calls `InterviewQuestionService` for primary question generation from the edited profile.
+  - Calls `SpeechSynthesisService` during `.speaking` to ask questions aloud.
+  - Simulates listening, pause, processing, and feedback transitions.
   - Calls `AVAudioApplication.requestRecordPermission()` for microphone permission.
 
 ### Services
@@ -157,6 +164,18 @@ Rules:
   - Uses guided generation with `@Generable` and `@Guide` to produce structured analysis output.
   - Maps generated output into the existing `JobProfile` model.
   - Implements `MockJobAnalysisService` as a deterministic fallback.
+
+- `InterviewQuestionService.swift`
+  - Defines the `InterviewQuestionService` protocol.
+  - Implements `FoundationModelInterviewQuestionService` for primary question generation from the edited job profile.
+  - Limits primary questions by selected duration and caps the plan at five questions.
+  - Generates primary questions only; answer-based follow-ups are future work.
+  - Implements `MockInterviewQuestionService` as a deterministic fallback.
+
+- `SpeechSynthesisService.swift`
+  - Defines the `SpeechSynthesisService` protocol.
+  - Implements `InterviewSpeechSynthesisService` with `AVSpeechSynthesizer`.
+  - Speaks interviewer questions aloud and resumes the phase machine when speech finishes or is cancelled.
 
 ### Mock Data
 
@@ -224,7 +243,7 @@ When continuing development:
 - Keep code SwiftUI-native.
 - Keep one file per model.
 - Keep real AI/audio/speech functionality behind service boundaries.
-- Do not add audio capture, speech recognition, speech synthesis, live transcription, generated interview plans, answer analysis, or generated feedback unless the milestone explicitly asks for it.
+- Do not add audio capture, speech recognition, live transcription, answer-based follow-up generation, answer analysis, or generated feedback unless the milestone explicitly asks for it.
 - Do not show a live transcript unless explicitly requested.
 - Prefer adding service types before expanding `InterviewSessionViewModel` too much.
 - Keep `InterviewSessionViewModel` as the single source of truth until there is a real reason to split it.
@@ -233,11 +252,13 @@ When continuing development:
 
 ## Service Boundaries
 
-Current service:
+Current services:
 
 ```text
 Services/
   JobAnalysisService.swift
+  InterviewQuestionService.swift
+  SpeechSynthesisService.swift
 ```
 
 Suggested future service boundaries:
@@ -245,10 +266,9 @@ Suggested future service boundaries:
 ```text
 Services/
   MicrophonePermissionService.swift
-  InterviewQuestionService.swift
+  AnswerAnalysisService.swift
   FeedbackService.swift
   SpeechRecognitionService.swift
-  SpeechSynthesisService.swift
 ```
 
 Do not add future services early unless they remove real complexity.

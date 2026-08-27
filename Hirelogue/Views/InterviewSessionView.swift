@@ -1,9 +1,9 @@
 import SwiftUI
 
-/// Simulated voice-interview screen.
+/// Voice-interview screen.
 ///
-/// This view intentionally shows no transcript. It visualizes future speaking,
-/// listening, pause, processing, and finished states using view-model timers.
+/// This view intentionally shows no transcript. The interviewer speaks questions aloud,
+/// while listening, pause, processing, and finished states remain prototype simulations.
 struct InterviewSessionView: View {
     // MARK: - Dependencies
 

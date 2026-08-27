@@ -29,6 +29,10 @@ final class InterviewSessionViewModel {
     /// Non-nil when the app had to use prototype fallback data instead of a Foundation Models result.
     var analysisErrorMessage: String?
     var isRequestingMicrophonePermission = false
+    /// True while Foundation Models is generating the question plan from the edited setup profile.
+    var isGeneratingInterviewQuestions = false
+    /// Non-nil when question generation falls back to prototype questions.
+    var questionGenerationErrorMessage: String?
 
     // MARK: - Interview Session State
 
@@ -42,7 +46,7 @@ final class InterviewSessionViewModel {
 
     // MARK: - Static Fixtures
 
-    let questions = MockHirelogueData.questions
+    var questions = MockHirelogueData.questions
     let feedback = MockHirelogueData.feedback
 
     // MARK: - Services
@@ -51,6 +55,12 @@ final class InterviewSessionViewModel {
     @ObservationIgnored private let jobAnalysisService: any JobAnalysisService
     /// Keeps the prototype usable on devices where Apple Intelligence is unavailable.
     @ObservationIgnored private let fallbackJobAnalysisService: any JobAnalysisService
+    /// Generates role-specific questions from the edited setup profile.
+    @ObservationIgnored private let interviewQuestionService: any InterviewQuestionService
+    /// Keeps the interview flow usable when Foundation Models question generation fails.
+    @ObservationIgnored private let fallbackInterviewQuestionService: any InterviewQuestionService
+    /// Speaks interviewer prompts aloud during the session's speaking phase.
+    @ObservationIgnored private let speechSynthesisService: any SpeechSynthesisService
 
     // MARK: - Internal Tasks
 
@@ -63,10 +73,16 @@ final class InterviewSessionViewModel {
 
     init(
         jobAnalysisService: any JobAnalysisService = FoundationModelJobAnalysisService(),
-        fallbackJobAnalysisService: any JobAnalysisService = MockJobAnalysisService()
+        fallbackJobAnalysisService: any JobAnalysisService = MockJobAnalysisService(),
+        interviewQuestionService: any InterviewQuestionService = FoundationModelInterviewQuestionService(),
+        fallbackInterviewQuestionService: any InterviewQuestionService = MockInterviewQuestionService(),
+        speechSynthesisService: (any SpeechSynthesisService)? = nil
     ) {
         self.jobAnalysisService = jobAnalysisService
         self.fallbackJobAnalysisService = fallbackJobAnalysisService
+        self.interviewQuestionService = interviewQuestionService
+        self.fallbackInterviewQuestionService = fallbackInterviewQuestionService
+        self.speechSynthesisService = speechSynthesisService ?? InterviewSpeechSynthesisService()
     }
 
     // MARK: - Derived Display State
@@ -102,6 +118,11 @@ final class InterviewSessionViewModel {
         return "\(minutes):\(String(format: "%02d", seconds))"
     }
 
+    /// Whether the setup screen should disable Start while preparing to enter the session.
+    var isPreparingInterviewStart: Bool {
+        isRequestingMicrophonePermission || isGeneratingInterviewQuestions
+    }
+
     // MARK: - Home Actions
 
     /// Fills the Home text editor with a complete sample job opening.
@@ -112,7 +133,6 @@ final class InterviewSessionViewModel {
     /// Extracts a job profile with Foundation Models, falling back to mock data if unavailable.
     func analyzeJobOpening(onComplete: @escaping () -> Void) {
         guard canAnalyze else { return }
-//        analysisTask?.cancel()
         isAnalyzing = true
         analysisProgress = 0
         analysisErrorMessage = nil
@@ -151,6 +171,7 @@ final class InterviewSessionViewModel {
     /// Commits the analyzed profile and lets the root coordinator navigate to setup.
     private func finishAnalysis(with profile: JobProfile, onComplete: @escaping () -> Void) {
         jobProfile = profile
+        questions = MockHirelogueData.questions
         completed = false
         analysisProgress = 1
         isAnalyzing = false
@@ -193,6 +214,41 @@ final class InterviewSessionViewModel {
         jobProfile = profile
     }
 
+    /// Generates the interview question plan from the user-confirmed setup profile and prints it to Xcode's console.
+    func generateInterviewQuestionsForCurrentProfile() async -> Bool {
+        guard let profile = jobProfile else { return false }
+
+        isGeneratingInterviewQuestions = true
+        questionGenerationErrorMessage = nil
+
+        do {
+            let generatedQuestions = try await interviewQuestionService.generateQuestions(
+                for: profile,
+                interviewType: interviewType,
+                duration: duration
+            )
+            guard !generatedQuestions.isEmpty else {
+                throw InterviewQuestionGenerationError.emptyQuestionPlan
+            }
+
+            questions = generatedQuestions
+            printInterviewQuestions(generatedQuestions, source: "Foundation Models")
+            isGeneratingInterviewQuestions = false
+            return true
+        } catch {
+            questionGenerationErrorMessage = error.localizedDescription
+            let fallbackQuestions = (try? await fallbackInterviewQuestionService.generateQuestions(
+                for: profile,
+                interviewType: interviewType,
+                duration: duration
+            )) ?? MockHirelogueData.questions
+            questions = fallbackQuestions
+            printInterviewQuestions(fallbackQuestions, source: "Prototype fallback")
+            isGeneratingInterviewQuestions = false
+            return true
+        }
+    }
+
     /// Requests system microphone permission before entering the voice-session UI.
     func requestMicrophonePermission() async -> Bool {
         isRequestingMicrophonePermission = true
@@ -202,6 +258,19 @@ final class InterviewSessionViewModel {
     }
 
     // MARK: - Session Actions
+
+    /// Prints the generated question plan in a readable block for early integration checks.
+    private func printInterviewQuestions(_ questions: [InterviewQuestion], source: String) {
+        print("\n=== Hirelogue Interview Questions (\(source)) ===")
+        for (index, question) in questions.enumerated() {
+            print("\(index + 1). [\(question.kind.rawValue.capitalized)] \(question.text)")
+            print("   Competency: \(question.competency)")
+            if let followUp = question.followUp {
+                print("   Follow-up: \(followUp)")
+            }
+        }
+        print("=== End Interview Questions ===\n")
+    }
 
     /// Starts a fresh mock interview and begins the timer-driven phase machine.
     func startInterview() {
@@ -270,10 +339,13 @@ final class InterviewSessionViewModel {
         jobProfile = nil
         interviewType = .mixed
         duration = .ten
+        questions = MockHirelogueData.questions
         isAnalyzing = false
         analysisProgress = 0
         analysisStatusMessage = "Identifying the role, qualifications, and interview competencies."
         analysisErrorMessage = nil
+        isGeneratingInterviewQuestions = false
+        questionGenerationErrorMessage = nil
         phase = .speaking
         questionIndex = 0
         isFollowUp = false
@@ -304,14 +376,16 @@ final class InterviewSessionViewModel {
 
     /// Drives the scripted mock interview: speaking -> listening -> paused -> processing.
     private func schedulePhaseTransition() {
+        speechSynthesisService.stopSpeaking()
         phaseTask?.cancel()
         countdownTask?.cancel()
 
         switch phase {
         case .speaking:
             phaseTask = Task { [weak self] in
-                try? await Task.sleep(nanoseconds: 4_200_000_000)
-                guard let self, !Task.isCancelled else { return }
+                guard let self else { return }
+                await speechSynthesisService.speak(currentQuestionText)
+                guard !Task.isCancelled else { return }
                 phase = .listening
                 schedulePhaseTransition()
             }
@@ -374,8 +448,9 @@ final class InterviewSessionViewModel {
         schedulePhaseTransition()
     }
 
-    /// Stops all active interview timers so stale tasks cannot mutate a new session.
+    /// Stops all active interview timers and speech so stale tasks cannot mutate a new session.
     private func cancelInterviewTasks() {
+        speechSynthesisService.stopSpeaking()
         phaseTask?.cancel()
         countdownTask?.cancel()
         remainingTimeTask?.cancel()

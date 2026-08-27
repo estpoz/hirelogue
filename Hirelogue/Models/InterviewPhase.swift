@@ -24,7 +24,7 @@ enum InterviewPhase: String, CaseIterable, Identifiable {
     /// Short instruction that explains what the user should do in this phase.
     var instruction: String {
         switch self {
-        case .speaking: "Listen to the question. Recording starts automatically in the finished app."
+        case .speaking: "Listen to the question. The session switches to listening when the interviewer finishes."
         case .listening: "Answer naturally. The interview continues when you finish."
         case .paused: "Continue speaking to keep answering."
         case .processing: "Preparing the next question."
@@ -35,7 +35,7 @@ enum InterviewPhase: String, CaseIterable, Identifiable {
     /// Compact footer status shown below interview progress.
     var status: String {
         switch self {
-        case .speaking: "Not listening yet"
+        case .speaking: "Speaking question aloud"
         case .listening: "Microphone simulated"
         case .paused: "Waiting for you"
         case .processing: "Processing"
