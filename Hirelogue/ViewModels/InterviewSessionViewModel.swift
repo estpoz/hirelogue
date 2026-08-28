@@ -33,6 +33,8 @@ final class InterviewSessionViewModel {
     var isGeneratingInterviewQuestions = false
     /// Non-nil when question generation falls back to prototype questions.
     var questionGenerationErrorMessage: String?
+    /// Non-nil when live speech transcription cannot start or permission is denied.
+    var transcriptionErrorMessage: String?
 
     // MARK: - Interview Session State
 
@@ -43,6 +45,10 @@ final class InterviewSessionViewModel {
     var secondsRemaining = InterviewDuration.ten.rawValue * 60
     var completed = false
     var shouldShowFeedback = false
+    /// Temporary validation surface: shows what SpeechAnalyzer hears while the candidate answers.
+    var liveTranscript = ""
+    /// True only while microphone audio is actively being streamed to SpeechAnalyzer.
+    var isTranscribing = false
 
     // MARK: - Static Fixtures
 
@@ -61,6 +67,8 @@ final class InterviewSessionViewModel {
     @ObservationIgnored private let fallbackInterviewQuestionService: any InterviewQuestionService
     /// Speaks interviewer prompts aloud during the session's speaking phase.
     @ObservationIgnored private let speechSynthesisService: any SpeechSynthesisService
+    /// Streams the candidate's spoken answers into visible live text during listening.
+    @ObservationIgnored private let speechTranscriptionService: any SpeechTranscriptionService
 
     // MARK: - Internal Tasks
 
@@ -70,19 +78,25 @@ final class InterviewSessionViewModel {
     @ObservationIgnored private var phaseTask: Task<Void, Never>?
     @ObservationIgnored private var countdownTask: Task<Void, Never>?
     @ObservationIgnored private var remainingTimeTask: Task<Void, Never>?
+    @ObservationIgnored private var currentAnswerTranscriptSegments: [String] = []
+    @ObservationIgnored private let silenceWarningInterval: TimeInterval = 3
+    @ObservationIgnored private let silenceFinalizeInterval: TimeInterval = 3
+    @ObservationIgnored private var lastTranscriptActivityDate = Date()
 
     init(
         jobAnalysisService: any JobAnalysisService = FoundationModelJobAnalysisService(),
         fallbackJobAnalysisService: any JobAnalysisService = MockJobAnalysisService(),
         interviewQuestionService: any InterviewQuestionService = FoundationModelInterviewQuestionService(),
         fallbackInterviewQuestionService: any InterviewQuestionService = MockInterviewQuestionService(),
-        speechSynthesisService: (any SpeechSynthesisService)? = nil
+        speechSynthesisService: (any SpeechSynthesisService)? = nil,
+        speechTranscriptionService: (any SpeechTranscriptionService)? = nil
     ) {
         self.jobAnalysisService = jobAnalysisService
         self.fallbackJobAnalysisService = fallbackJobAnalysisService
         self.interviewQuestionService = interviewQuestionService
         self.fallbackInterviewQuestionService = fallbackInterviewQuestionService
         self.speechSynthesisService = speechSynthesisService ?? InterviewSpeechSynthesisService()
+        self.speechTranscriptionService = speechTranscriptionService ?? SpeechAnalyzerTranscriptionService()
     }
 
     // MARK: - Derived Display State
@@ -249,12 +263,26 @@ final class InterviewSessionViewModel {
         }
     }
 
-    /// Requests system microphone permission before entering the voice-session UI.
-    func requestMicrophonePermission() async -> Bool {
+    /// Requests both microphone and speech-recognition permissions before entering the voice-session UI.
+    func requestInterviewAudioPermissions() async -> Bool {
         isRequestingMicrophonePermission = true
-        let isGranted = await AVAudioApplication.requestRecordPermission()
+        transcriptionErrorMessage = nil
+
+        let isMicrophoneGranted = await AVAudioApplication.requestRecordPermission()
+        guard isMicrophoneGranted else {
+            transcriptionErrorMessage = "Microphone access is required to hear your spoken answers."
+            isRequestingMicrophonePermission = false
+            return false
+        }
+
+        let isSpeechRecognitionGranted = await speechTranscriptionService.requestSpeechRecognitionPermission()
         isRequestingMicrophonePermission = false
-        return isGranted
+
+        if !isSpeechRecognitionGranted {
+            transcriptionErrorMessage = "Speech recognition access is required to transcribe your answers."
+        }
+
+        return isSpeechRecognitionGranted
     }
 
     // MARK: - Session Actions
@@ -282,6 +310,7 @@ final class InterviewSessionViewModel {
         secondsRemaining = duration.rawValue * 60
         completed = false
         shouldShowFeedback = false
+        resetCurrentAnswerTranscript()
         startRemainingTimeTimer()
         schedulePhaseTransition()
     }
@@ -296,6 +325,22 @@ final class InterviewSessionViewModel {
     func continueSpeaking() {
         phase = .listening
         schedulePhaseTransition()
+    }
+
+    /// Lets the candidate submit the current answer without waiting for silence detection.
+    func finishCurrentAnswer() {
+        guard phase == .listening || phase == .paused else { return }
+        phaseTask?.cancel()
+        countdownTask?.cancel()
+        pauseCountdown = 0
+
+        phaseTask = Task { [weak self] in
+            guard let self else { return }
+            await stopTranscribingCurrentAnswerSegment()
+            guard !Task.isCancelled else { return }
+            phase = .processing
+            schedulePhaseTransition()
+        }
     }
 
     /// Advances the prototype controls without waiting for the timer sequence.
@@ -346,6 +391,8 @@ final class InterviewSessionViewModel {
         analysisErrorMessage = nil
         isGeneratingInterviewQuestions = false
         questionGenerationErrorMessage = nil
+        transcriptionErrorMessage = nil
+        resetCurrentAnswerTranscript()
         phase = .speaking
         questionIndex = 0
         isFollowUp = false
@@ -374,11 +421,18 @@ final class InterviewSessionViewModel {
         }
     }
 
-    /// Drives the scripted mock interview: speaking -> listening -> paused -> processing.
+    /// Drives the interview phases: speaking -> listening -> paused warning -> processing.
     private func schedulePhaseTransition() {
         speechSynthesisService.stopSpeaking()
         phaseTask?.cancel()
         countdownTask?.cancel()
+
+        if phase != .listening && phase != .paused {
+            Task { [weak self] in
+                guard let self else { return }
+                await stopTranscribingCurrentAnswerSegment()
+            }
+        }
 
         switch phase {
         case .speaking:
@@ -386,30 +440,44 @@ final class InterviewSessionViewModel {
                 guard let self else { return }
                 await speechSynthesisService.speak(currentQuestionText)
                 guard !Task.isCancelled else { return }
+                // Give the audio route a brief moment to settle before switching from speech output to recording.
+                try? await Task.sleep(nanoseconds: 350_000_000)
+                guard !Task.isCancelled else { return }
                 phase = .listening
                 schedulePhaseTransition()
             }
         case .listening:
             phaseTask = Task { [weak self] in
-                try? await Task.sleep(nanoseconds: 6_500_000_000)
-                guard let self, !Task.isCancelled else { return }
-                pauseCountdown = 3
-                phase = .paused
-                schedulePhaseTransition()
+                guard let self else { return }
+                await startTranscribingCurrentAnswerSegment()
+                await monitorForInitialSilence()
             }
         case .paused:
             pauseCountdown = 3
             countdownTask = Task { [weak self] in
+                guard let self else { return }
+                let warningStartedAt = lastTranscriptActivityDate
+                let pausedStartedAt = Date()
+
                 while !Task.isCancelled {
                     try? await Task.sleep(nanoseconds: 1_000_000_000)
-                    guard let self, !Task.isCancelled else { return }
-                    if pauseCountdown <= 1 {
+                    guard !Task.isCancelled, phase == .paused else { return }
+
+                    if lastTranscriptActivityDate > warningStartedAt {
+                        phase = .listening
+                        schedulePhaseTransition()
+                        return
+                    }
+
+                    if Date().timeIntervalSince(pausedStartedAt) >= silenceFinalizeInterval {
                         pauseCountdown = 0
+                        await stopTranscribingCurrentAnswerSegment()
                         phase = .processing
                         schedulePhaseTransition()
                         return
                     }
-                    pauseCountdown -= 1
+
+                    pauseCountdown = max(0, Int(ceil(silenceFinalizeInterval - Date().timeIntervalSince(pausedStartedAt))))
                 }
             }
         case .processing:
@@ -429,8 +497,84 @@ final class InterviewSessionViewModel {
         }
     }
 
+    // MARK: - Speech Transcription
+
+    /// Clears the answer transcript when the interviewer moves to a new question prompt.
+    private func resetCurrentAnswerTranscript() {
+        currentAnswerTranscriptSegments = []
+        liveTranscript = ""
+        isTranscribing = false
+        lastTranscriptActivityDate = Date()
+    }
+
+    /// Starts a SpeechAnalyzer capture pass and mirrors partial transcription into the visible session UI.
+    private func startTranscribingCurrentAnswerSegment() async {
+        guard !isTranscribing else { return }
+
+        transcriptionErrorMessage = nil
+        isTranscribing = true
+        lastTranscriptActivityDate = Date()
+
+        let existingTranscript = currentAnswerTranscriptSegments.joined(separator: " ")
+
+        do {
+            try await speechTranscriptionService.startTranscribing { [weak self] (partialTranscript: String) in
+                guard let self else { return }
+                let visibleTranscript = [existingTranscript, partialTranscript]
+                    .filter { !$0.isEmpty }
+                    .joined(separator: " ")
+
+                if visibleTranscript != liveTranscript {
+                    liveTranscript = visibleTranscript
+                    lastTranscriptActivityDate = Date()
+
+                    if phase == .paused {
+                        pauseCountdown = 3
+                        phase = .listening
+                        schedulePhaseTransition()
+                    }
+                }
+            }
+        } catch {
+            isTranscribing = false
+            transcriptionErrorMessage = error.localizedDescription
+            print("Hirelogue transcription start error: \(error.localizedDescription)")
+        }
+    }
+
+    /// Watches for the first silence window while recording remains active.
+    private func monitorForInitialSilence() async {
+        while !Task.isCancelled {
+            try? await Task.sleep(nanoseconds: 250_000_000)
+            guard !Task.isCancelled, phase == .listening else { return }
+
+            if Date().timeIntervalSince(lastTranscriptActivityDate) >= silenceWarningInterval {
+                pauseCountdown = Int(silenceFinalizeInterval)
+                phase = .paused
+                schedulePhaseTransition()
+                return
+            }
+        }
+    }
+
+    /// Stops the current capture pass, preserves the final segment, and prints it for debugging.
+    private func stopTranscribingCurrentAnswerSegment() async {
+        guard isTranscribing else { return }
+
+        let finalSegment = await speechTranscriptionService.stopTranscribing()
+        isTranscribing = false
+
+        guard !finalSegment.isEmpty else { return }
+        currentAnswerTranscriptSegments.append(finalSegment)
+        liveTranscript = currentAnswerTranscriptSegments.joined(separator: " ")
+        print("Hirelogue answer transcript: \(liveTranscript)")
+    }
+
+    // MARK: - Question Progression
+
     /// Chooses a follow-up when available, otherwise advances to the next question.
     private func advanceQuestion() {
+        resetCurrentAnswerTranscript()
         if !isFollowUp, currentQuestion.followUp != nil {
             isFollowUp = true
             phase = .speaking
@@ -448,9 +592,13 @@ final class InterviewSessionViewModel {
         schedulePhaseTransition()
     }
 
-    /// Stops all active interview timers and speech so stale tasks cannot mutate a new session.
+    /// Stops all active interview timers, speech, and transcription so stale tasks cannot mutate a new session.
     private func cancelInterviewTasks() {
         speechSynthesisService.stopSpeaking()
+        Task { [weak self] in
+            guard let self else { return }
+            await stopTranscribingCurrentAnswerSegment()
+        }
         phaseTask?.cancel()
         countdownTask?.cancel()
         remainingTimeTask?.cancel()

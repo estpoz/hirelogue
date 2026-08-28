@@ -2,8 +2,8 @@ import SwiftUI
 
 /// Voice-interview screen.
 ///
-/// This view intentionally shows no transcript. The interviewer speaks questions aloud,
-/// while listening, pause, processing, and finished states remain prototype simulations.
+/// The interviewer speaks questions aloud, and the current prototype shows a live transcript
+/// during listening so transcription accuracy can be validated while answer capture is built.
 struct InterviewSessionView: View {
     // MARK: - Dependencies
 
@@ -111,7 +111,7 @@ struct InterviewSessionView: View {
                         .font(.title3.weight(.semibold))
                         .multilineTextAlignment(.center)
                     if viewModel.phase == .paused {
-                        Text("Continuing in \(viewModel.pauseCountdown)s")
+                        Text("Processing in \(viewModel.pauseCountdown)s")
                             .font(.subheadline.monospacedDigit().weight(.semibold))
                             .foregroundStyle(.orange)
                     }
@@ -125,13 +125,18 @@ struct InterviewSessionView: View {
                     questionCard
                 }
 
-                if viewModel.phase == .paused {
+                if shouldShowTranscriptCard {
+                    transcriptCard
+                }
+
+                if shouldShowDoneAnsweringButton {
                     Button {
-                        viewModel.continueSpeaking()
+                        viewModel.finishCurrentAnswer()
                     } label: {
-                        Label("Simulate Speaking", systemImage: "waveform")
+                        Label("Done Answering", systemImage: "checkmark.circle.fill")
+                            .frame(maxWidth: .infinity)
                     }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(.borderedProminent)
                     .controlSize(.large)
                 }
             }
@@ -139,6 +144,16 @@ struct InterviewSessionView: View {
             .padding(.horizontal, 24)
             .padding(.vertical, 28)
         }
+    }
+
+    /// Whether the temporary live transcript panel should be visible for validation.
+    private var shouldShowTranscriptCard: Bool {
+        viewModel.phase == .listening || viewModel.phase == .paused
+    }
+
+    /// Whether the candidate can manually submit instead of waiting for silence detection.
+    private var shouldShowDoneAnsweringButton: Bool {
+        viewModel.phase == .listening || viewModel.phase == .paused
     }
 
     /// Card for the current interviewer question or follow-up prompt.
@@ -151,6 +166,46 @@ struct InterviewSessionView: View {
             Text(viewModel.currentQuestionText)
                 .font(.body)
                 .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(.secondarySystemGroupedBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(Color(.separator).opacity(0.45), lineWidth: 0.5)
+        }
+    }
+
+    /// Temporary validation card for checking live speech transcription accuracy.
+    private var transcriptCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: viewModel.isTranscribing ? "waveform" : "text.bubble")
+                    .foregroundStyle(viewModel.isTranscribing ? Color.accentColor : .secondary)
+                Text("Live transcript")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .textCase(.uppercase)
+                Spacer()
+                if viewModel.isTranscribing {
+                    Text("Listening")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(Color.accentColor)
+                }
+            }
+
+            Text(viewModel.liveTranscript.isEmpty ? "Start speaking to see transcription here." : viewModel.liveTranscript)
+                .font(.body)
+                .foregroundStyle(viewModel.liveTranscript.isEmpty ? .tertiary : .primary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if let transcriptionErrorMessage = viewModel.transcriptionErrorMessage {
+                Text(transcriptionErrorMessage)
+                    .font(.footnote)
+                    .foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)

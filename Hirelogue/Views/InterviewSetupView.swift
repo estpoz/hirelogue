@@ -6,7 +6,7 @@ struct InterviewSetupView: View {
 
     @Bindable var viewModel: InterviewSessionViewModel
 
-    /// Called after microphone permission is granted and the mock session starts.
+    /// Called after audio permissions are granted and the mock session starts.
     let onStartInterview: () -> Void
 
     /// Called when setup is opened without a prepared job profile.
@@ -15,7 +15,7 @@ struct InterviewSetupView: View {
     // MARK: - Local UI State
 
     @State private var isEditingProfile = false
-    @State private var isMicrophoneDeniedAlertPresented = false
+    @State private var isAudioPermissionDeniedAlertPresented = false
     @State private var draftPosition = ""
     @State private var draftSeniority = ""
     @State private var editingListSection: EditableListSection?
@@ -109,7 +109,7 @@ struct InterviewSetupView: View {
                                 Label("Generating Questions...", systemImage: "sparkles")
                                     .frame(maxWidth: .infinity)
                             } else if viewModel.isRequestingMicrophonePermission {
-                                Label("Requesting Microphone...", systemImage: "mic.circle")
+                                Label("Requesting Audio Access...", systemImage: "mic.circle")
                                     .frame(maxWidth: .infinity)
                             } else {
                                 Label("Start Interview", systemImage: "mic.circle.fill")
@@ -129,10 +129,10 @@ struct InterviewSetupView: View {
                 .sheet(item: $editingListSection) { section in
                     editListSheet(for: section)
                 }
-                .alert("Microphone Access Needed", isPresented: $isMicrophoneDeniedAlertPresented) {
+                .alert("Audio Access Needed", isPresented: $isAudioPermissionDeniedAlertPresented) {
                     Button("OK", role: .cancel) {}
                 } message: {
-                    Text("Hirelogue needs microphone access before starting a voice interview. You can enable it later in Settings.")
+                    Text(viewModel.transcriptionErrorMessage ?? "Hirelogue needs microphone and speech recognition access before starting a voice interview. You can enable them later in Settings.")
                 }
             } else {
                 EmptyStateView(
@@ -300,14 +300,14 @@ struct InterviewSetupView: View {
         editingListSection = nil
     }
 
-    /// Generates the question plan from the edited setup profile, then gates the session behind microphone permission.
+    /// Generates the question plan from the edited setup profile, then gates the session behind audio permissions.
     private func startInterviewAfterPermission() async {
         let didGenerateQuestions = await viewModel.generateInterviewQuestionsForCurrentProfile()
         guard didGenerateQuestions else { return }
 
-        let isGranted = await viewModel.requestMicrophonePermission()
+        let isGranted = await viewModel.requestInterviewAudioPermissions()
         guard isGranted else {
-            isMicrophoneDeniedAlertPresented = true
+            isAudioPermissionDeniedAlertPresented = true
             return
         }
 

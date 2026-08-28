@@ -5,5 +5,8 @@
     <!-- Required before calling AVAudioApplication.requestRecordPermission(). -->
     <key>NSMicrophoneUsageDescription</key>
     <string>Hirelogue uses your microphone during practice interviews so it can listen to your spoken answers.</string>
+    <!-- Required before requesting SFSpeechRecognizer authorization for live answer transcription. -->
+    <key>NSSpeechRecognitionUsageDescription</key>
+    <string>Hirelogue uses speech recognition to transcribe your spoken practice answers during the interview.</string>
 </dict>
 </plist>

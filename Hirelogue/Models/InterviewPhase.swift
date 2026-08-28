@@ -26,7 +26,7 @@ enum InterviewPhase: String, CaseIterable, Identifiable {
         switch self {
         case .speaking: "Listen to the question. The session switches to listening when the interviewer finishes."
         case .listening: "Answer naturally. The interview continues when you finish."
-        case .paused: "Continue speaking to keep answering."
+        case .paused: "Continue speaking to keep answering, or stay quiet to submit your answer."
         case .processing: "Preparing the next question."
         case .finished: "Preparing your feedback."
         }
@@ -36,7 +36,7 @@ enum InterviewPhase: String, CaseIterable, Identifiable {
     var status: String {
         switch self {
         case .speaking: "Speaking question aloud"
-        case .listening: "Microphone simulated"
+        case .listening: "Microphone live"
         case .paused: "Waiting for you"
         case .processing: "Processing"
         case .finished: "Finishing up"
