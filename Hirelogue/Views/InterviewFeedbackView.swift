@@ -20,6 +20,14 @@ struct InterviewFeedbackView: View {
                 VStack(spacing: 0) {
                     ScrollView {
                         VStack(spacing: 16) {
+                            if viewModel.isGeneratingFeedback {
+                                feedbackLoadingCard
+                            }
+
+                            if let feedbackGenerationErrorMessage = viewModel.feedbackGenerationErrorMessage {
+                                fallbackNoticeCard(message: feedbackGenerationErrorMessage)
+                            }
+
                             summaryCard(profile: profile)
                             competenciesCard
                             strengthsCard
@@ -77,6 +85,33 @@ struct InterviewFeedbackView: View {
     }
 
     // MARK: - Feedback Sections
+
+    /// Progress state used if this screen is reached while final feedback is still being prepared.
+    private var feedbackLoadingCard: some View {
+        FeedbackCard("Preparing feedback") {
+            HStack(spacing: 12) {
+                ProgressView()
+                Text("Reviewing your interview answers.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    /// Makes fallback behavior visible without blocking the candidate from seeing usable practice feedback.
+    private func fallbackNoticeCard(message: String) -> some View {
+        FeedbackCard("Prototype fallback") {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+                    .padding(.top, 2)
+                Text("Foundation Models feedback could not complete: \(message)")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
 
     /// Summary card combines completion status, interview config, and overall feedback.
     private func summaryCard(profile: JobProfile) -> some View {

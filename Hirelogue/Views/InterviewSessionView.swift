@@ -48,7 +48,6 @@ struct InterviewSessionView: View {
                 ) {
                     Button("End Interview", role: .destructive) {
                         viewModel.endInterview()
-                        onShowFeedback()
                     }
                     Button("Continue Interview", role: .cancel) {}
                 } message: {
@@ -125,6 +124,10 @@ struct InterviewSessionView: View {
                     questionCard
                 }
 
+                if viewModel.isGeneratingFeedback {
+                    feedbackGenerationCard
+                }
+
                 if shouldShowTranscriptCard {
                     transcriptCard
                 }
@@ -169,6 +172,27 @@ struct InterviewSessionView: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(.secondarySystemGroupedBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(Color(.separator).opacity(0.45), lineWidth: 0.5)
+        }
+    }
+
+    /// Progress card shown while final structured feedback is generated.
+    private var feedbackGenerationCard: some View {
+        VStack(spacing: 12) {
+            ProgressView()
+            Text("Generating structured feedback")
+                .font(.headline)
+            Text("Reviewing your answers against the role competencies.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity)
         .background(Color(.secondarySystemGroupedBackground))
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay {

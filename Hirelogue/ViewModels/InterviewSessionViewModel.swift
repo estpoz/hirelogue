@@ -37,6 +37,10 @@ final class InterviewSessionViewModel {
     var transcriptionErrorMessage: String?
     /// Non-nil when answer review falls back to continuing without a follow-up.
     var followUpGenerationErrorMessage: String?
+    /// True while Foundation Models is generating final interview feedback.
+    var isGeneratingFeedback = false
+    /// Non-nil when final feedback falls back to prototype feedback.
+    var feedbackGenerationErrorMessage: String?
 
     // MARK: - Interview Session State
 
@@ -53,11 +57,13 @@ final class InterviewSessionViewModel {
     var isTranscribing = false
     /// Dynamic follow-up generated from the current transcribed answer.
     var generatedFollowUpQuestion: String?
+    /// Captured transcripts for the completed primary questions and their optional follow-ups.
+    var answerHistory: [InterviewAnswer] = []
 
-    // MARK: - Static Fixtures
+    // MARK: - Feedback State
 
     var questions = MockHirelogueData.questions
-    let feedback = MockHirelogueData.feedback
+    var feedback = MockHirelogueData.feedback
 
     // MARK: - Services
 
@@ -77,6 +83,10 @@ final class InterviewSessionViewModel {
     @ObservationIgnored private let answerFollowUpService: any AnswerFollowUpService
     /// Keeps the interview moving if Foundation Models cannot review an answer.
     @ObservationIgnored private let fallbackAnswerFollowUpService: any AnswerFollowUpService
+    /// Generates the structured feedback shown after a completed interview.
+    @ObservationIgnored private let interviewFeedbackService: any InterviewFeedbackService
+    /// Keeps the final screen usable when Foundation Models feedback generation fails.
+    @ObservationIgnored private let fallbackInterviewFeedbackService: any InterviewFeedbackService
 
     // MARK: - Internal Tasks
 
@@ -86,6 +96,7 @@ final class InterviewSessionViewModel {
     @ObservationIgnored private var phaseTask: Task<Void, Never>?
     @ObservationIgnored private var countdownTask: Task<Void, Never>?
     @ObservationIgnored private var remainingTimeTask: Task<Void, Never>?
+    @ObservationIgnored private var feedbackTask: Task<Void, Never>?
     @ObservationIgnored private var currentAnswerTranscriptSegments: [String] = []
     @ObservationIgnored private var currentAnswerTranscript = ""
     @ObservationIgnored private var bestPartialTranscript = ""
@@ -101,7 +112,9 @@ final class InterviewSessionViewModel {
         speechSynthesisService: (any SpeechSynthesisService)? = nil,
         speechTranscriptionService: (any SpeechTranscriptionService)? = nil,
         answerFollowUpService: any AnswerFollowUpService = FoundationModelAnswerFollowUpService(),
-        fallbackAnswerFollowUpService: any AnswerFollowUpService = MockAnswerFollowUpService()
+        fallbackAnswerFollowUpService: any AnswerFollowUpService = MockAnswerFollowUpService(),
+        interviewFeedbackService: any InterviewFeedbackService = FoundationModelInterviewFeedbackService(),
+        fallbackInterviewFeedbackService: any InterviewFeedbackService = MockInterviewFeedbackService()
     ) {
         self.jobAnalysisService = jobAnalysisService
         self.fallbackJobAnalysisService = fallbackJobAnalysisService
@@ -111,6 +124,8 @@ final class InterviewSessionViewModel {
         self.speechTranscriptionService = speechTranscriptionService ?? SpeechAnalyzerTranscriptionService()
         self.answerFollowUpService = answerFollowUpService
         self.fallbackAnswerFollowUpService = fallbackAnswerFollowUpService
+        self.interviewFeedbackService = interviewFeedbackService
+        self.fallbackInterviewFeedbackService = fallbackInterviewFeedbackService
     }
 
     // MARK: - Derived Display State
@@ -326,6 +341,10 @@ final class InterviewSessionViewModel {
         isFollowUp = false
         generatedFollowUpQuestion = nil
         followUpGenerationErrorMessage = nil
+        feedbackGenerationErrorMessage = nil
+        isGeneratingFeedback = false
+        answerHistory = []
+        feedback = MockHirelogueData.feedback
         pauseCountdown = 3
         secondsRemaining = duration.rawValue * 60
         completed = false
@@ -372,11 +391,15 @@ final class InterviewSessionViewModel {
         schedulePhaseTransition()
     }
 
-    /// Ends the current mock interview and asks navigation to show feedback.
+    /// Ends the current interview early and generates feedback from the answers captured so far.
     func endInterview() {
-        completed = true
-        shouldShowFeedback = true
         cancelInterviewTasks()
+        phase = .finished
+        feedbackTask?.cancel()
+        feedbackTask = Task { [weak self] in
+            guard let self else { return }
+            await generateFinalFeedbackAndShow()
+        }
     }
 
     /// Moves the state machine to its terminal phase.
@@ -394,6 +417,11 @@ final class InterviewSessionViewModel {
         questionIndex = 0
         isFollowUp = false
         generatedFollowUpQuestion = nil
+        feedbackGenerationErrorMessage = nil
+        isGeneratingFeedback = false
+        answerHistory = []
+        feedback = MockHirelogueData.feedback
+        resetCurrentAnswerTranscript()
         pauseCountdown = 3
         secondsRemaining = duration.rawValue * 60
     }
@@ -415,7 +443,11 @@ final class InterviewSessionViewModel {
         questionGenerationErrorMessage = nil
         transcriptionErrorMessage = nil
         followUpGenerationErrorMessage = nil
+        feedbackGenerationErrorMessage = nil
+        isGeneratingFeedback = false
         generatedFollowUpQuestion = nil
+        answerHistory = []
+        feedback = MockHirelogueData.feedback
         resetCurrentAnswerTranscript()
         phase = .speaking
         questionIndex = 0
@@ -514,8 +546,7 @@ final class InterviewSessionViewModel {
             phaseTask = Task { [weak self] in
                 try? await Task.sleep(nanoseconds: 2_200_000_000)
                 guard let self, !Task.isCancelled else { return }
-                completed = true
-                shouldShowFeedback = true
+                await generateFinalFeedbackAndShow()
             }
         }
     }
@@ -650,6 +681,7 @@ final class InterviewSessionViewModel {
 
         if isFollowUp {
             print("Hirelogue follow-up answer transcript: \(answerTranscript)")
+            recordFollowUpAnswer(answerTranscript)
             moveToNextPrimaryQuestion()
             return
         }
@@ -680,15 +712,55 @@ final class InterviewSessionViewModel {
 
         printFollowUpDecision(decision, answerTranscript: answerTranscript)
         guard decision.needsFollowUp, let followUpQuestion = decision.question else {
+            recordPrimaryAnswer(answerTranscript, followUpQuestion: nil)
             moveToNextPrimaryQuestion()
             return
         }
 
+        recordPrimaryAnswer(answerTranscript, followUpQuestion: followUpQuestion)
         generatedFollowUpQuestion = followUpQuestion
         isFollowUp = true
         resetCurrentAnswerTranscript()
         phase = .speaking
         schedulePhaseTransition()
+    }
+
+    /// Stores the primary answer before the transcript buffer is cleared for the next prompt.
+    private func recordPrimaryAnswer(_ transcript: String, followUpQuestion: String?) {
+        let question = currentQuestion
+        let answer = InterviewAnswer(
+            id: "answer-\(answerHistory.count + 1)-\(question.id)",
+            questionID: question.id,
+            questionKind: question.kind,
+            competency: question.competency,
+            questionText: question.text,
+            primaryTranscript: transcript.isEmpty ? "[No transcript captured]" : transcript,
+            followUpQuestion: followUpQuestion,
+            followUpTranscript: nil
+        )
+        answerHistory.append(answer)
+    }
+
+    /// Completes the latest answer record with the transcript from its generated follow-up.
+    private func recordFollowUpAnswer(_ transcript: String) {
+        let cleanedTranscript = transcript.isEmpty ? "[No transcript captured]" : transcript
+        guard let answerIndex = answerHistory.lastIndex(where: { $0.questionID == currentQuestion.id && $0.followUpTranscript == nil }) else {
+            recordPrimaryAnswer("[No primary transcript captured]", followUpQuestion: currentQuestionText)
+            recordFollowUpAnswer(cleanedTranscript)
+            return
+        }
+
+        let existingAnswer = answerHistory[answerIndex]
+        answerHistory[answerIndex] = InterviewAnswer(
+            id: existingAnswer.id,
+            questionID: existingAnswer.questionID,
+            questionKind: existingAnswer.questionKind,
+            competency: existingAnswer.competency,
+            questionText: existingAnswer.questionText,
+            primaryTranscript: existingAnswer.primaryTranscript,
+            followUpQuestion: existingAnswer.followUpQuestion,
+            followUpTranscript: cleanedTranscript
+        )
     }
 
     /// Returns the latest answer text after ensuring active transcription has stopped.
@@ -712,6 +784,54 @@ final class InterviewSessionViewModel {
         print("=== End Follow-Up Decision ===\n")
     }
 
+    /// Generates final feedback from bounded answer history, then allows navigation to the feedback screen.
+    private func generateFinalFeedbackAndShow() async {
+        guard let profile = jobProfile else {
+            completed = true
+            shouldShowFeedback = true
+            return
+        }
+
+        isGeneratingFeedback = true
+        feedbackGenerationErrorMessage = nil
+
+        do {
+            feedback = try await interviewFeedbackService.generateFeedback(
+                for: profile,
+                questions: questions,
+                answers: answerHistory,
+                interviewType: interviewType,
+                duration: duration
+            )
+        } catch {
+            feedbackGenerationErrorMessage = error.localizedDescription
+            feedback = (try? await fallbackInterviewFeedbackService.generateFeedback(
+                for: profile,
+                questions: questions,
+                answers: answerHistory,
+                interviewType: interviewType,
+                duration: duration
+            )) ?? MockHirelogueData.feedback
+        }
+
+        guard !Task.isCancelled else { return }
+        printFinalFeedbackSummary()
+        isGeneratingFeedback = false
+        completed = true
+        shouldShowFeedback = true
+    }
+
+    /// Prints a compact feedback-generation summary for development validation.
+    private func printFinalFeedbackSummary() {
+        print("\n=== Hirelogue Final Feedback ===")
+        print("Captured answer turns: \(answerHistory.count)")
+        if let feedbackGenerationErrorMessage {
+            print("Feedback fallback reason: \(feedbackGenerationErrorMessage)")
+        }
+        print("Summary: \(feedback.summary)")
+        print("=== End Final Feedback ===\n")
+    }
+
     /// Advances to the next primary question, clearing dynamic follow-up and transcript state.
     private func moveToNextPrimaryQuestion() {
         isFollowUp = false
@@ -729,6 +849,7 @@ final class InterviewSessionViewModel {
 
     /// Stops all active interview timers, speech, and transcription so stale tasks cannot mutate a new session.
     private func cancelInterviewTasks() {
+        feedbackTask?.cancel()
         speechSynthesisService.stopSpeaking()
         Task { [weak self] in
             guard let self else { return }
