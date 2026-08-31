@@ -128,6 +128,10 @@ struct InterviewSessionView: View {
                     feedbackGenerationCard
                 }
 
+                if viewModel.phase == .confirm {
+                    transcriptConfirmationCard
+                }
+
                 if shouldShowTranscriptCard {
                     transcriptCard
                 }
@@ -169,6 +173,60 @@ struct InterviewSessionView: View {
             Text(viewModel.currentQuestionText)
                 .font(.body)
                 .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(.secondarySystemGroupedBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(Color(.separator).opacity(0.45), lineWidth: 0.5)
+        }
+    }
+
+    /// Editable review card shown after transcription stops and before model processing begins.
+    private var transcriptConfirmationCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                Image(systemName: "text.badge.checkmark")
+                    .foregroundStyle(Color.accentColor)
+                Text("Confirm transcript")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .textCase(.uppercase)
+                Spacer()
+            }
+
+            ZStack(alignment: .topLeading) {
+                TextEditor(text: $viewModel.editableTranscript)
+                    .font(.body)
+                    .scrollContentBackground(.hidden)
+                    .padding(8)
+                    .frame(minHeight: 150)
+                    .background(Color(.systemBackground), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .stroke(Color(.separator).opacity(0.45), lineWidth: 0.5)
+                    }
+
+                if viewModel.editableTranscript.isEmpty {
+                    Text("No transcript captured. You can type your answer here before submitting.")
+                        .font(.body)
+                        .foregroundStyle(.tertiary)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 16)
+                        .allowsHitTesting(false)
+                }
+            }
+
+            Button {
+                viewModel.submitConfirmedAnswer()
+            } label: {
+                Label("Submit Answer", systemImage: "paperplane.fill")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)

@@ -343,8 +343,8 @@ struct InterviewPhaseIndicator: View {
             }
             .frame(width: 140, height: 140)
 
-            if phase == .listening || phase == .processing {
-                Image(systemName: phase == .listening ? "mic.fill" : "sparkles")
+            if phase == .listening || phase == .confirm || phase == .processing {
+                Image(systemName: badgeSymbol)
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(indicatorColor)
                     .frame(width: 36, height: 36)
@@ -383,6 +383,10 @@ struct InterviewPhaseIndicator: View {
                     .font(.caption.monospacedDigit().weight(.bold))
             }
             .foregroundStyle(indicatorColor)
+        case .confirm:
+            Image(systemName: "text.badge.checkmark")
+                .font(.system(size: 34, weight: .semibold))
+                .foregroundStyle(indicatorColor)
         case .processing:
             ProgressView()
                 .tint(indicatorColor)
@@ -394,6 +398,20 @@ struct InterviewPhaseIndicator: View {
         }
     }
 
+    /// Symbol shown in the small status badge for active non-speaking phases.
+    private var badgeSymbol: String {
+        switch phase {
+        case .listening:
+            return "mic.fill"
+        case .confirm:
+            return "pencil"
+        case .processing:
+            return "sparkles"
+        case .speaking, .paused, .finished:
+            return ""
+        }
+    }
+
     /// Semantic tint for each phase.
     private var indicatorColor: Color {
         switch phase {
@@ -401,7 +419,7 @@ struct InterviewPhaseIndicator: View {
             return .accentColor
         case .listening, .finished:
             return .green
-        case .paused:
+        case .paused, .confirm:
             return .orange
         }
     }

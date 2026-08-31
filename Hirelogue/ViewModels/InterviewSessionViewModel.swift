@@ -53,6 +53,8 @@ final class InterviewSessionViewModel {
     var shouldShowFeedback = false
     /// Temporary validation surface: shows what SpeechAnalyzer hears while the candidate answers.
     var liveTranscript = ""
+    /// Editable copy of the stopped transcript that the user reviews before submission.
+    var editableTranscript = ""
     /// True only while microphone audio is actively being streamed to SpeechAnalyzer.
     var isTranscribing = false
     /// Dynamic follow-up generated from the current transcribed answer.
@@ -375,11 +377,22 @@ final class InterviewSessionViewModel {
 
         phaseTask = Task { [weak self] in
             guard let self else { return }
-            await stopTranscribingCurrentAnswerSegment()
+            await prepareCurrentAnswerConfirmation()
             guard !Task.isCancelled else { return }
-            phase = .processing
+            phase = .confirm
             schedulePhaseTransition()
         }
+    }
+
+    /// Submits the reviewed transcript into the existing answer-processing flow.
+    func submitConfirmedAnswer() {
+        guard phase == .confirm else { return }
+        let confirmedTranscript = normalizedTranscript(editableTranscript)
+        currentAnswerTranscript = confirmedTranscript
+        bestPartialTranscript = confirmedTranscript
+        liveTranscript = confirmedTranscript
+        phase = .processing
+        schedulePhaseTransition()
     }
 
     /// Advances the prototype controls without waiting for the timer sequence.
@@ -527,8 +540,8 @@ final class InterviewSessionViewModel {
 
                     if Date().timeIntervalSince(pausedStartedAt) >= silenceFinalizeInterval {
                         pauseCountdown = 0
-                        await stopTranscribingCurrentAnswerSegment()
-                        phase = .processing
+                        await prepareCurrentAnswerConfirmation()
+                        phase = .confirm
                         schedulePhaseTransition()
                         return
                     }
@@ -536,6 +549,8 @@ final class InterviewSessionViewModel {
                     pauseCountdown = max(0, Int(ceil(silenceFinalizeInterval - Date().timeIntervalSince(pausedStartedAt))))
                 }
             }
+        case .confirm:
+            break
         case .processing:
             phaseTask = Task { [weak self] in
                 guard let self else { return }
@@ -559,6 +574,7 @@ final class InterviewSessionViewModel {
         currentAnswerTranscript = ""
         bestPartialTranscript = ""
         liveTranscript = ""
+        editableTranscript = ""
         isTranscribing = false
         lastTranscriptActivityDate = Date()
     }
@@ -761,6 +777,11 @@ final class InterviewSessionViewModel {
             followUpQuestion: existingAnswer.followUpQuestion,
             followUpTranscript: cleanedTranscript
         )
+    }
+
+    /// Stops recording and copies the final transcript into the editable confirmation buffer.
+    private func prepareCurrentAnswerConfirmation() async {
+        editableTranscript = await finalizedCurrentAnswerTranscript()
     }
 
     /// Returns the latest answer text after ensuring active transcription has stopped.
