@@ -169,21 +169,27 @@ struct CompetencyTag: View {
     }
 
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
             if let symbol {
                 Image(systemName: symbol)
                     .imageScale(.small)
             }
 
+            // AI-generated competencies can be longer than hand-written tags, so labels wrap inside the pill.
             VStack(alignment: .leading, spacing: 1) {
                 Text(label)
                     .font(.footnote.weight(.semibold))
+                    .lineLimit(3)
+                    .fixedSize(horizontal: false, vertical: true)
                 if let note {
                     Text(note)
                         .font(.caption2)
                         .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
+            .layoutPriority(1)
 
             if let onRemove {
                 Button(action: onRemove) {
@@ -197,7 +203,7 @@ struct CompetencyTag: View {
         .padding(.horizontal, 10)
         .padding(.vertical, 7)
         .foregroundStyle(tagTint)
-        .background(tagBackground, in: Capsule())
+        .background(tagBackground, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
     private var tagTint: Color {
@@ -337,8 +343,8 @@ struct InterviewPhaseIndicator: View {
             }
             .frame(width: 140, height: 140)
 
-            if phase == .listening || phase == .processing {
-                Image(systemName: phase == .listening ? "mic.fill" : "sparkles")
+            if phase == .listening || phase == .confirm || phase == .processing {
+                Image(systemName: badgeSymbol)
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(indicatorColor)
                     .frame(width: 36, height: 36)
@@ -377,6 +383,10 @@ struct InterviewPhaseIndicator: View {
                     .font(.caption.monospacedDigit().weight(.bold))
             }
             .foregroundStyle(indicatorColor)
+        case .confirm:
+            Image(systemName: "text.badge.checkmark")
+                .font(.system(size: 34, weight: .semibold))
+                .foregroundStyle(indicatorColor)
         case .processing:
             ProgressView()
                 .tint(indicatorColor)
@@ -388,6 +398,20 @@ struct InterviewPhaseIndicator: View {
         }
     }
 
+    /// Symbol shown in the small status badge for active non-speaking phases.
+    private var badgeSymbol: String {
+        switch phase {
+        case .listening:
+            return "mic.fill"
+        case .confirm:
+            return "pencil"
+        case .processing:
+            return "sparkles"
+        case .speaking, .paused, .finished:
+            return ""
+        }
+    }
+
     /// Semantic tint for each phase.
     private var indicatorColor: Color {
         switch phase {
@@ -395,7 +419,7 @@ struct InterviewPhaseIndicator: View {
             return .accentColor
         case .listening, .finished:
             return .green
-        case .paused:
+        case .paused, .confirm:
             return .orange
         }
     }
@@ -528,16 +552,17 @@ struct FlowLayout: Layout {
 
     /// Groups subviews into rows based on the available width.
     private func rows(in maxWidth: CGFloat, subviews: Subviews) -> [FlowRow] {
+        let availableWidth = max(maxWidth, 0)
         var rows: [FlowRow] = []
         var currentItems: [FlowItem] = []
         var currentWidth: CGFloat = 0
         var currentHeight: CGFloat = 0
 
         for index in subviews.indices {
-            let size = subviews[index].sizeThatFits(.unspecified)
+            let size = measuredSize(for: subviews[index], maxWidth: availableWidth)
             let proposedWidth = currentItems.isEmpty ? size.width : currentWidth + spacing + size.width
 
-            if proposedWidth > maxWidth, !currentItems.isEmpty {
+            if proposedWidth > availableWidth, !currentItems.isEmpty {
                 rows.append(FlowRow(items: currentItems, height: currentHeight))
                 currentItems = [FlowItem(index: index, size: size)]
                 currentWidth = size.width
@@ -554,6 +579,17 @@ struct FlowLayout: Layout {
         }
 
         return rows
+    }
+
+    /// Measures an item with a width cap so long generated tags wrap inside their card.
+    private func measuredSize(for subview: LayoutSubviews.Element, maxWidth: CGFloat) -> CGSize {
+        let idealSize = subview.sizeThatFits(.unspecified)
+        guard maxWidth > 0, idealSize.width > maxWidth else {
+            return idealSize
+        }
+
+        let constrainedSize = subview.sizeThatFits(ProposedViewSize(width: maxWidth, height: nil))
+        return CGSize(width: min(constrainedSize.width, maxWidth), height: constrainedSize.height)
     }
 }
 

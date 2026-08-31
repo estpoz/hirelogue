@@ -1,9 +1,9 @@
 import SwiftUI
 
-/// Simulated voice-interview screen.
+/// Voice-interview screen.
 ///
-/// This view intentionally shows no transcript. It visualizes future speaking,
-/// listening, pause, processing, and finished states using view-model timers.
+/// The interviewer speaks questions aloud, and the current prototype shows a live transcript
+/// during listening so transcription accuracy can be validated while answer capture is built.
 struct InterviewSessionView: View {
     // MARK: - Dependencies
 
@@ -48,7 +48,6 @@ struct InterviewSessionView: View {
                 ) {
                     Button("End Interview", role: .destructive) {
                         viewModel.endInterview()
-                        onShowFeedback()
                     }
                     Button("Continue Interview", role: .cancel) {}
                 } message: {
@@ -111,7 +110,7 @@ struct InterviewSessionView: View {
                         .font(.title3.weight(.semibold))
                         .multilineTextAlignment(.center)
                     if viewModel.phase == .paused {
-                        Text("Continuing in \(viewModel.pauseCountdown)s")
+                        Text("Processing in \(viewModel.pauseCountdown)s")
                             .font(.subheadline.monospacedDigit().weight(.semibold))
                             .foregroundStyle(.orange)
                     }
@@ -125,13 +124,26 @@ struct InterviewSessionView: View {
                     questionCard
                 }
 
-                if viewModel.phase == .paused {
+                if viewModel.isGeneratingFeedback {
+                    feedbackGenerationCard
+                }
+
+                if viewModel.phase == .confirm {
+                    transcriptConfirmationCard
+                }
+
+                if shouldShowTranscriptCard {
+                    transcriptCard
+                }
+
+                if shouldShowDoneAnsweringButton {
                     Button {
-                        viewModel.continueSpeaking()
+                        viewModel.finishCurrentAnswer()
                     } label: {
-                        Label("Simulate Speaking", systemImage: "waveform")
+                        Label("Done Answering", systemImage: "checkmark.circle.fill")
+                            .frame(maxWidth: .infinity)
                     }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(.borderedProminent)
                     .controlSize(.large)
                 }
             }
@@ -139,6 +151,16 @@ struct InterviewSessionView: View {
             .padding(.horizontal, 24)
             .padding(.vertical, 28)
         }
+    }
+
+    /// Whether the temporary live transcript panel should be visible for validation.
+    private var shouldShowTranscriptCard: Bool {
+        viewModel.phase == .listening || viewModel.phase == .paused
+    }
+
+    /// Whether the candidate can manually submit instead of waiting for silence detection.
+    private var shouldShowDoneAnsweringButton: Bool {
+        viewModel.phase == .listening || viewModel.phase == .paused
     }
 
     /// Card for the current interviewer question or follow-up prompt.
@@ -151,6 +173,121 @@ struct InterviewSessionView: View {
             Text(viewModel.currentQuestionText)
                 .font(.body)
                 .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(.secondarySystemGroupedBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(Color(.separator).opacity(0.45), lineWidth: 0.5)
+        }
+    }
+
+    /// Editable review card shown after transcription stops and before model processing begins.
+    private var transcriptConfirmationCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                Image(systemName: "text.badge.checkmark")
+                    .foregroundStyle(Color.accentColor)
+                Text("Confirm transcript")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .textCase(.uppercase)
+                Spacer()
+            }
+
+            ZStack(alignment: .topLeading) {
+                TextEditor(text: $viewModel.editableTranscript)
+                    .font(.body)
+                    .scrollContentBackground(.hidden)
+                    .padding(8)
+                    .frame(minHeight: 150)
+                    .background(Color(.systemBackground), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .stroke(Color(.separator).opacity(0.45), lineWidth: 0.5)
+                    }
+
+                if viewModel.editableTranscript.isEmpty {
+                    Text("No transcript captured. You can type your answer here before submitting.")
+                        .font(.body)
+                        .foregroundStyle(.tertiary)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 16)
+                        .allowsHitTesting(false)
+                }
+            }
+
+            Button {
+                viewModel.submitConfirmedAnswer()
+            } label: {
+                Label("Submit Answer", systemImage: "paperplane.fill")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(.secondarySystemGroupedBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(Color(.separator).opacity(0.45), lineWidth: 0.5)
+        }
+    }
+
+    /// Progress card shown while final structured feedback is generated.
+    private var feedbackGenerationCard: some View {
+        VStack(spacing: 12) {
+            ProgressView()
+            Text("Generating structured feedback")
+                .font(.headline)
+            Text("Reviewing your answers against the role competencies.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity)
+        .background(Color(.secondarySystemGroupedBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(Color(.separator).opacity(0.45), lineWidth: 0.5)
+        }
+    }
+
+    /// Temporary validation card for checking live speech transcription accuracy.
+    private var transcriptCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: viewModel.isTranscribing ? "waveform" : "text.bubble")
+                    .foregroundStyle(viewModel.isTranscribing ? Color.accentColor : .secondary)
+                Text("Live transcript")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .textCase(.uppercase)
+                Spacer()
+                if viewModel.isTranscribing {
+                    Text("Listening")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(Color.accentColor)
+                }
+            }
+
+            Text(viewModel.liveTranscript.isEmpty ? "Start speaking to see transcription here." : viewModel.liveTranscript)
+                .font(.body)
+                .foregroundStyle(viewModel.liveTranscript.isEmpty ? .tertiary : .primary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if let transcriptionErrorMessage = viewModel.transcriptionErrorMessage {
+                Text(transcriptionErrorMessage)
+                    .font(.footnote)
+                    .foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)

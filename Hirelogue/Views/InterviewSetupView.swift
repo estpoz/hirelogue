@@ -6,7 +6,7 @@ struct InterviewSetupView: View {
 
     @Bindable var viewModel: InterviewSessionViewModel
 
-    /// Called after microphone permission is granted and the mock session starts.
+    /// Called after audio permissions are granted and the mock session starts.
     let onStartInterview: () -> Void
 
     /// Called when setup is opened without a prepared job profile.
@@ -15,7 +15,7 @@ struct InterviewSetupView: View {
     // MARK: - Local UI State
 
     @State private var isEditingProfile = false
-    @State private var isMicrophoneDeniedAlertPresented = false
+    @State private var isAudioPermissionDeniedAlertPresented = false
     @State private var draftPosition = ""
     @State private var draftSeniority = ""
     @State private var editingListSection: EditableListSection?
@@ -35,6 +35,14 @@ struct InterviewSetupView: View {
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .padding(.horizontal, 20)
                                 .padding(.top, 16)
+
+                            if let analysisErrorMessage = viewModel.analysisErrorMessage {
+                                fallbackNotice(message: analysisErrorMessage)
+                            }
+
+                            if let questionGenerationErrorMessage = viewModel.questionGenerationErrorMessage {
+                                fallbackNotice(message: questionGenerationErrorMessage)
+                            }
 
                             GroupedCard(
                                 "Job profile",
@@ -97,8 +105,11 @@ struct InterviewSetupView: View {
                                 await startInterviewAfterPermission()
                             }
                         } label: {
-                            if viewModel.isRequestingMicrophonePermission {
-                                Label("Requesting Microphone...", systemImage: "mic.circle")
+                            if viewModel.isGeneratingInterviewQuestions {
+                                Label("Generating Questions...", systemImage: "sparkles")
+                                    .frame(maxWidth: .infinity)
+                            } else if viewModel.isRequestingMicrophonePermission {
+                                Label("Requesting Audio Access...", systemImage: "mic.circle")
                                     .frame(maxWidth: .infinity)
                             } else {
                                 Label("Start Interview", systemImage: "mic.circle.fill")
@@ -107,7 +118,7 @@ struct InterviewSetupView: View {
                         }
                         .buttonStyle(.borderedProminent)
                         .controlSize(.large)
-                        .disabled(viewModel.isRequestingMicrophonePermission)
+                        .disabled(viewModel.isPreparingInterviewStart)
                     }
                 }
                 .navigationTitle("Interview Setup")
@@ -118,10 +129,10 @@ struct InterviewSetupView: View {
                 .sheet(item: $editingListSection) { section in
                     editListSheet(for: section)
                 }
-                .alert("Microphone Access Needed", isPresented: $isMicrophoneDeniedAlertPresented) {
+                .alert("Audio Access Needed", isPresented: $isAudioPermissionDeniedAlertPresented) {
                     Button("OK", role: .cancel) {}
                 } message: {
-                    Text("Hirelogue needs microphone access before starting a voice interview. You can enable it later in Settings.")
+                    Text(viewModel.transcriptionErrorMessage ?? "Hirelogue needs microphone and speech recognition access before starting a voice interview. You can enable them later in Settings.")
                 }
             } else {
                 EmptyStateView(
@@ -137,6 +148,23 @@ struct InterviewSetupView: View {
     }
 
     // MARK: - Configuration Sections
+
+    /// Explains when extracted setup data is coming from the prototype fallback instead of Foundation Models.
+    private func fallbackNotice(message: String) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.orange)
+                .padding(.top, 2)
+            Text(message)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.orange.opacity(0.10), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .padding(.horizontal, 16)
+    }
 
     /// Segmented selector for the style of questions to ask.
     private var interviewTypeSection: some View {
@@ -272,11 +300,14 @@ struct InterviewSetupView: View {
         editingListSection = nil
     }
 
-    /// Gates the interview behind system microphone permission.
+    /// Generates the question plan from the edited setup profile, then gates the session behind audio permissions.
     private func startInterviewAfterPermission() async {
-        let isGranted = await viewModel.requestMicrophonePermission()
+        let didGenerateQuestions = await viewModel.generateInterviewQuestionsForCurrentProfile()
+        guard didGenerateQuestions else { return }
+
+        let isGranted = await viewModel.requestInterviewAudioPermissions()
         guard isGranted else {
-            isMicrophoneDeniedAlertPresented = true
+            isAudioPermissionDeniedAlertPresented = true
             return
         }
 

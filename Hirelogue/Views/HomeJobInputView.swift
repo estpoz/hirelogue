@@ -118,10 +118,10 @@ struct HomeJobInputView: View {
             }
             .frame(height: 260)
 
-            Text("The job opening will be analyzed with mock data for this app-base milestone.")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 4)
+//            Text("The job opening will be analyzed with mock data for this app-base milestone.")
+//                .font(.footnote)
+//                .foregroundStyle(.secondary)
+//                .padding(.horizontal, 4)
         }
         .padding(.horizontal, 16)
     }
@@ -138,7 +138,7 @@ struct HomeJobInputView: View {
                     .progressViewStyle(.linear)
                 Text("Analyzing job opening...")
                     .font(.headline)
-                Text("Identifying the role, qualifications, and interview competencies.")
+                Text(viewModel.analysisStatusMessage)
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
