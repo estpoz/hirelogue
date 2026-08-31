@@ -35,6 +35,8 @@ final class InterviewSessionViewModel {
     var questionGenerationErrorMessage: String?
     /// Non-nil when live speech transcription cannot start or permission is denied.
     var transcriptionErrorMessage: String?
+    /// Non-nil when answer review falls back to continuing without a follow-up.
+    var followUpGenerationErrorMessage: String?
 
     // MARK: - Interview Session State
 
@@ -49,6 +51,8 @@ final class InterviewSessionViewModel {
     var liveTranscript = ""
     /// True only while microphone audio is actively being streamed to SpeechAnalyzer.
     var isTranscribing = false
+    /// Dynamic follow-up generated from the current transcribed answer.
+    var generatedFollowUpQuestion: String?
 
     // MARK: - Static Fixtures
 
@@ -69,6 +73,10 @@ final class InterviewSessionViewModel {
     @ObservationIgnored private let speechSynthesisService: any SpeechSynthesisService
     /// Streams the candidate's spoken answers into visible live text during listening.
     @ObservationIgnored private let speechTranscriptionService: any SpeechTranscriptionService
+    /// Reviews transcribed answers and generates one follow-up question when needed.
+    @ObservationIgnored private let answerFollowUpService: any AnswerFollowUpService
+    /// Keeps the interview moving if Foundation Models cannot review an answer.
+    @ObservationIgnored private let fallbackAnswerFollowUpService: any AnswerFollowUpService
 
     // MARK: - Internal Tasks
 
@@ -79,6 +87,8 @@ final class InterviewSessionViewModel {
     @ObservationIgnored private var countdownTask: Task<Void, Never>?
     @ObservationIgnored private var remainingTimeTask: Task<Void, Never>?
     @ObservationIgnored private var currentAnswerTranscriptSegments: [String] = []
+    @ObservationIgnored private var currentAnswerTranscript = ""
+    @ObservationIgnored private var bestPartialTranscript = ""
     @ObservationIgnored private let silenceWarningInterval: TimeInterval = 3
     @ObservationIgnored private let silenceFinalizeInterval: TimeInterval = 3
     @ObservationIgnored private var lastTranscriptActivityDate = Date()
@@ -89,7 +99,9 @@ final class InterviewSessionViewModel {
         interviewQuestionService: any InterviewQuestionService = FoundationModelInterviewQuestionService(),
         fallbackInterviewQuestionService: any InterviewQuestionService = MockInterviewQuestionService(),
         speechSynthesisService: (any SpeechSynthesisService)? = nil,
-        speechTranscriptionService: (any SpeechTranscriptionService)? = nil
+        speechTranscriptionService: (any SpeechTranscriptionService)? = nil,
+        answerFollowUpService: any AnswerFollowUpService = FoundationModelAnswerFollowUpService(),
+        fallbackAnswerFollowUpService: any AnswerFollowUpService = MockAnswerFollowUpService()
     ) {
         self.jobAnalysisService = jobAnalysisService
         self.fallbackJobAnalysisService = fallbackJobAnalysisService
@@ -97,6 +109,8 @@ final class InterviewSessionViewModel {
         self.fallbackInterviewQuestionService = fallbackInterviewQuestionService
         self.speechSynthesisService = speechSynthesisService ?? InterviewSpeechSynthesisService()
         self.speechTranscriptionService = speechTranscriptionService ?? SpeechAnalyzerTranscriptionService()
+        self.answerFollowUpService = answerFollowUpService
+        self.fallbackAnswerFollowUpService = fallbackAnswerFollowUpService
     }
 
     // MARK: - Derived Display State
@@ -113,6 +127,10 @@ final class InterviewSessionViewModel {
 
     /// Current prompt text, using the follow-up when the phase machine requests it.
     var currentQuestionText: String {
+        if isFollowUp, let generatedFollowUpQuestion {
+            return generatedFollowUpQuestion
+        }
+
         if isFollowUp, let followUp = currentQuestion.followUp {
             return followUp
         }
@@ -306,6 +324,8 @@ final class InterviewSessionViewModel {
         phase = .speaking
         questionIndex = 0
         isFollowUp = false
+        generatedFollowUpQuestion = nil
+        followUpGenerationErrorMessage = nil
         pauseCountdown = 3
         secondsRemaining = duration.rawValue * 60
         completed = false
@@ -346,6 +366,7 @@ final class InterviewSessionViewModel {
     /// Advances the prototype controls without waiting for the timer sequence.
     func moveToNextQuestionForDemo() {
         isFollowUp = false
+        generatedFollowUpQuestion = nil
         questionIndex = (questionIndex + 1) % questions.count
         phase = .speaking
         schedulePhaseTransition()
@@ -372,6 +393,7 @@ final class InterviewSessionViewModel {
         phase = .speaking
         questionIndex = 0
         isFollowUp = false
+        generatedFollowUpQuestion = nil
         pauseCountdown = 3
         secondsRemaining = duration.rawValue * 60
     }
@@ -392,6 +414,8 @@ final class InterviewSessionViewModel {
         isGeneratingInterviewQuestions = false
         questionGenerationErrorMessage = nil
         transcriptionErrorMessage = nil
+        followUpGenerationErrorMessage = nil
+        generatedFollowUpQuestion = nil
         resetCurrentAnswerTranscript()
         phase = .speaking
         questionIndex = 0
@@ -482,9 +506,8 @@ final class InterviewSessionViewModel {
             }
         case .processing:
             phaseTask = Task { [weak self] in
-                try? await Task.sleep(nanoseconds: 2_600_000_000)
-                guard let self, !Task.isCancelled else { return }
-                advanceQuestion()
+                guard let self else { return }
+                await processCurrentAnswerAndAdvance()
             }
         case .finished:
             remainingTimeTask?.cancel()
@@ -502,6 +525,8 @@ final class InterviewSessionViewModel {
     /// Clears the answer transcript when the interviewer moves to a new question prompt.
     private func resetCurrentAnswerTranscript() {
         currentAnswerTranscriptSegments = []
+        currentAnswerTranscript = ""
+        bestPartialTranscript = ""
         liveTranscript = ""
         isTranscribing = false
         lastTranscriptActivityDate = Date()
@@ -515,17 +540,12 @@ final class InterviewSessionViewModel {
         isTranscribing = true
         lastTranscriptActivityDate = Date()
 
-        let existingTranscript = currentAnswerTranscriptSegments.joined(separator: " ")
-
         do {
             try await speechTranscriptionService.startTranscribing { [weak self] (partialTranscript: String) in
                 guard let self else { return }
-                let visibleTranscript = [existingTranscript, partialTranscript]
-                    .filter { !$0.isEmpty }
-                    .joined(separator: " ")
+                let didUpdateTranscript = mergePartialTranscript(partialTranscript)
 
-                if visibleTranscript != liveTranscript {
-                    liveTranscript = visibleTranscript
+                if didUpdateTranscript {
                     lastTranscriptActivityDate = Date()
 
                     if phase == .paused {
@@ -557,32 +577,147 @@ final class InterviewSessionViewModel {
         }
     }
 
+    /// Preserves the best full-session transcript while ignoring empty, shorter, or duplicate recognizer revisions.
+    private func mergePartialTranscript(_ partialTranscript: String) -> Bool {
+        let cleanedPartial = normalizedTranscript(partialTranscript)
+        guard !cleanedPartial.isEmpty else { return false }
+
+        if currentAnswerTranscript.isEmpty {
+            currentAnswerTranscript = cleanedPartial
+            bestPartialTranscript = cleanedPartial
+            liveTranscript = currentAnswerTranscript
+            return true
+        }
+
+        if cleanedPartial == currentAnswerTranscript || cleanedPartial == bestPartialTranscript {
+            return false
+        }
+
+        if cleanedPartial.count >= bestPartialTranscript.count && cleanedPartial.hasPrefix(bestPartialTranscript) {
+            bestPartialTranscript = cleanedPartial
+            currentAnswerTranscript = cleanedPartial
+            liveTranscript = currentAnswerTranscript
+            return true
+        }
+
+        if cleanedPartial.count > currentAnswerTranscript.count && cleanedPartial.hasPrefix(currentAnswerTranscript) {
+            currentAnswerTranscript = cleanedPartial
+            bestPartialTranscript = cleanedPartial
+            liveTranscript = currentAnswerTranscript
+            return true
+        }
+
+        if currentAnswerTranscript.contains(cleanedPartial) {
+            return false
+        }
+
+        if cleanedPartial.count > currentAnswerTranscript.count {
+            currentAnswerTranscript = cleanedPartial
+            bestPartialTranscript = cleanedPartial
+            liveTranscript = currentAnswerTranscript
+            return true
+        }
+
+        return false
+    }
+
+    /// Collapses whitespace so transcript comparisons are stable across recognizer updates.
+    private func normalizedTranscript(_ transcript: String) -> String {
+        transcript
+            .components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+    }
+
     /// Stops the current capture pass, preserves the final segment, and prints it for debugging.
     private func stopTranscribingCurrentAnswerSegment() async {
         guard isTranscribing else { return }
 
         let finalSegment = await speechTranscriptionService.stopTranscribing()
         isTranscribing = false
+        _ = mergePartialTranscript(finalSegment)
 
-        guard !finalSegment.isEmpty else { return }
-        currentAnswerTranscriptSegments.append(finalSegment)
-        liveTranscript = currentAnswerTranscriptSegments.joined(separator: " ")
-        print("Hirelogue answer transcript: \(liveTranscript)")
+        guard !currentAnswerTranscript.isEmpty else { return }
     }
 
-    // MARK: - Question Progression
+    // MARK: - Answer Review and Question Progression
 
-    /// Chooses a follow-up when available, otherwise advances to the next question.
-    private func advanceQuestion() {
-        resetCurrentAnswerTranscript()
-        if !isFollowUp, currentQuestion.followUp != nil {
-            isFollowUp = true
-            phase = .speaking
-            schedulePhaseTransition()
+    /// Reviews the finalized transcript and either asks one generated follow-up or advances.
+    private func processCurrentAnswerAndAdvance() async {
+        let answerTranscript = await finalizedCurrentAnswerTranscript()
+        try? await Task.sleep(nanoseconds: 650_000_000)
+        guard !Task.isCancelled else { return }
+
+        if isFollowUp {
+            print("Hirelogue follow-up answer transcript: \(answerTranscript)")
+            moveToNextPrimaryQuestion()
             return
         }
 
+        guard let profile = jobProfile else {
+            moveToNextPrimaryQuestion()
+            return
+        }
+
+        let decision: AnswerFollowUpDecision
+        do {
+            decision = try await answerFollowUpService.generateFollowUpIfNeeded(
+                for: profile,
+                question: currentQuestion,
+                transcript: answerTranscript,
+                interviewType: interviewType
+            )
+            followUpGenerationErrorMessage = nil
+        } catch {
+            followUpGenerationErrorMessage = error.localizedDescription
+            decision = (try? await fallbackAnswerFollowUpService.generateFollowUpIfNeeded(
+                for: profile,
+                question: currentQuestion,
+                transcript: answerTranscript,
+                interviewType: interviewType
+            )) ?? .noFollowUp
+        }
+
+        printFollowUpDecision(decision, answerTranscript: answerTranscript)
+        guard decision.needsFollowUp, let followUpQuestion = decision.question else {
+            moveToNextPrimaryQuestion()
+            return
+        }
+
+        generatedFollowUpQuestion = followUpQuestion
+        isFollowUp = true
+        resetCurrentAnswerTranscript()
+        phase = .speaking
+        schedulePhaseTransition()
+    }
+
+    /// Returns the latest answer text after ensuring active transcription has stopped.
+    private func finalizedCurrentAnswerTranscript() async -> String {
+        await stopTranscribingCurrentAnswerSegment()
+        let transcript = normalizedTranscript(currentAnswerTranscript)
+        return transcript
+    }
+
+    /// Prints the follow-up decision so generated interviewer behavior is visible during development.
+    private func printFollowUpDecision(_ decision: AnswerFollowUpDecision, answerTranscript: String) {
+        print("\n=== Hirelogue Follow-Up Decision ===")
+        print("Question: \(currentQuestion.text)")
+        print("Transcript sent to model:")
+        print(answerTranscript.isEmpty ? "[No transcript captured]" : answerTranscript)
+        print("Follow-up needed: \(decision.needsFollowUp)")
+        print("Reason: \(decision.reason)")
+        if let question = decision.question {
+            print("Follow-up question: \(question)")
+        }
+        print("=== End Follow-Up Decision ===\n")
+    }
+
+    /// Advances to the next primary question, clearing dynamic follow-up and transcript state.
+    private func moveToNextPrimaryQuestion() {
         isFollowUp = false
+        generatedFollowUpQuestion = nil
+        resetCurrentAnswerTranscript()
+
         if questionIndex >= questions.count - 1 {
             phase = .finished
         } else {

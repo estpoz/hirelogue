@@ -253,9 +253,8 @@ final class SpeechAnalyzerTranscriptionService: SpeechTranscriptionService {
         try audioSession.setCategory(.playAndRecord, mode: .measurement, options: [.duckOthers, .defaultToSpeaker])
         try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
 
-        for attempt in 1...8 {
+        for _ in 1...8 {
             let microphoneFormat = audioEngine.inputNode.inputFormat(forBus: 0)
-            logAudioRoute(format: microphoneFormat, attempt: attempt)
 
             if microphoneFormat.sampleRate > 0, microphoneFormat.channelCount > 0 {
                 return microphoneFormat
@@ -265,23 +264,6 @@ final class SpeechAnalyzerTranscriptionService: SpeechTranscriptionService {
         }
 
         throw SpeechTranscriptionError.invalidMicrophoneFormat
-    }
-
-    /// Prints the active audio route while diagnosing speech-output to recording transitions.
-    private func logAudioRoute(format: AVAudioFormat, attempt: Int) {
-        let audioSession = AVAudioSession.sharedInstance()
-        let inputs = audioSession.currentRoute.inputs.map(\.portName).joined(separator: ", ")
-        let outputs = audioSession.currentRoute.outputs.map(\.portName).joined(separator: ", ")
-
-        print(
-            """
-            Hirelogue audio route attempt \(attempt):
-              inputs: \(inputs.isEmpty ? "none" : inputs)
-              outputs: \(outputs.isEmpty ? "none" : outputs)
-              sampleRate: \(format.sampleRate)
-              channels: \(format.channelCount)
-            """
-        )
     }
 
     /// Captures microphone buffers, converts them to SpeechAnalyzer's preferred format, then streams them for transcription.
