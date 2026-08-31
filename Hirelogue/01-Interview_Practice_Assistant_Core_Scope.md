@@ -15,7 +15,7 @@ The application is intended as a practice tool. Its feedback does not predict em
 - **Foundation Models:** Extracts the job profile, prepares the interview plan, generates adaptive questions and follow-up questions, analyzes answers, and produces final feedback.
 - **SpeechAnalyzer:** Manages speech analysis sessions and accepts audio input for speech modules.
 - **SpeechTranscriber:** Transcribes the user's spoken answers internally during the interview.
-- **SpeechDetector:** Provides voice activity detection to help gate transcription; deterministic Swift logic owns the turn-taking thresholds and countdown behavior.
+- **SpeechDetector:** Planned voice activity detection refinement. The current implementation uses transcript activity timestamps and deterministic Swift thresholds for turn-taking.
 - **AVSpeechSynthesizer:** Presents the AI interviewer's questions through spoken audio.
 - **AVAudioEngine:** Captures microphone input for transcription.
 - **SwiftUI:** Provides the application interface and represents the interview-session state.
@@ -45,15 +45,16 @@ The interview language is fixed to English. The application does not ask the use
 
 1. The AI interviewer introduces the session and asks a question aloud.
 2. When the AI finishes speaking, the application automatically begins listening.
-3. SpeechAnalyzer transcribes the user's answer internally.
-4. The transcript is not displayed while the interview is in progress.
-5. Speech and silence detection determine when the user has finished answering.
-6. Foundation Models analyzes the finalized answer.
-7. The AI interviewer performs one of the following actions:
+3. SpeechAnalyzer transcribes the user's answer, with `SFSpeechRecognizer` as a fallback if SpeechAnalyzer assets are unavailable.
+4. The current prototype displays the live transcript during the interview only for development validation.
+5. Transcript activity and silence thresholds determine when the user may have finished answering.
+6. The user can tap `Done Answering` to submit without waiting for silence finalization.
+7. Foundation Models analyzes the finalized full-answer transcript for follow-up needs.
+8. The AI interviewer performs one of the following actions:
    - Asks one relevant follow-up question
    - Requests clarification
    - Moves to the next competency or planned question
-8. The next question is presented aloud and the cycle continues until the interview ends.
+9. The next question is presented aloud and the cycle continues until the interview ends.
 
 ### 3.3 Post-Interview Feedback
 
@@ -69,7 +70,7 @@ After the interview, the application generates structured feedback containing:
 - Stronger example formulations for selected answers
 - Recommended areas to practise before the real interview
 
-The internal transcript may support the feedback, but it is not shown during the interview. Whether users can inspect the full transcript after the session is outside the currently confirmed core scope.
+The internal transcript may support the feedback. The current prototype shows the live transcript during the interview for validation, but whether users can inspect the full transcript after the session is outside the currently confirmed core scope.
 
 ## 4. Conversation Model
 
@@ -84,7 +85,7 @@ The core session states are:
 5. **Processing:** Analyze the answer and determine the next interview action.
 6. **Finished:** End the interview and generate final feedback.
 
-A silence threshold and short visual countdown should prevent brief thinking pauses from ending an answer prematurely. If the user resumes speaking, the countdown is cancelled.
+A 3-second silence threshold moves the session from **Listening** to **Paused**. If the user resumes speaking, the countdown is cancelled and the session returns to **Listening**. If silence continues for 3 more seconds, the answer is finalized and sent to processing. The user can also tap **Done Answering** to finalize immediately.
 
 ## 5. Responsibility Boundaries
 
@@ -116,7 +117,7 @@ This separation keeps the interview bounded and predictable while still allowing
 - Maximum of five primary questions
 - Maximum of one follow-up per primary question
 - Automatic turn-taking through speech and silence detection
-- No transcript display during the interview
+- Temporary live transcript display is allowed during development validation
 - No interruption while the AI interviewer is speaking
 - No video or camera analysis
 - No facial-expression, emotion, accent, or voice-confidence scoring
