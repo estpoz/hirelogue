@@ -15,7 +15,7 @@ The intended final flow is:
 
 ## Current Milestone
 
-This project is currently an app-base prototype with focused real integrations for job-opening analysis, interview-question generation, spoken interviewer prompts, live answer transcription, and answer-based follow-up generation.
+This project is currently an app-base prototype with focused real integrations for job-opening analysis, interview-question generation, spoken interviewer prompts, live answer transcription, answer-based follow-up generation, transcript confirmation, and final feedback generation.
 
 The app now implements:
 - Foundation Models job-profile extraction for pasted job openings.
@@ -26,13 +26,16 @@ The app now implements:
 - AVSpeechSynthesizer playback for interviewer questions during the session's speaking phase.
 - SpeechAnalyzer/SpeechTranscriber transcription for spoken user answers, with `SFSpeechRecognizer` fallback when SpeechAnalyzer assets are unavailable.
 - AVAudioEngine microphone capture with route stabilization and audio conversion for SpeechAnalyzer.
-- Silence-based turn taking: after 3 seconds of no transcript activity, the app enters a paused warning state; after 3 more seconds, it finalizes the answer.
-- A `Done Answering` action that lets users submit the current answer without waiting for silence finalization.
-- Full-answer transcript preservation across `.listening` and `.paused`, so Foundation Models receives one whole answer for the current turn.
-- Foundation Models follow-up decisions from the finalized answer transcript, bounded to one follow-up per primary question.
+- Silence-based turn taking: after 3 seconds of no transcript activity, the app enters a paused warning state; after 3 more seconds, it stops transcription and moves to transcript confirmation.
+- A `Done Answering` action that lets users stop answer capture without waiting for silence finalization.
+- A `.confirm` phase where the stopped transcript is editable before the answer is submitted for follow-up analysis.
+- Full-answer transcript preservation across `.listening`, `.paused`, and `.confirm`, so Foundation Models receives the user-confirmed answer for the current turn.
+- Foundation Models follow-up decisions from the confirmed answer transcript, bounded to one follow-up per primary question.
+- `InterviewAnswer` history for each primary question, including optional generated follow-up questions and follow-up transcripts.
+- Foundation Models final feedback generation from the confirmed job profile, generated questions, and bounded answer history.
+- A deterministic mock feedback fallback when Foundation Models is unavailable, not linked, or fails feedback generation.
 
 The app still does not implement:
-- Foundation Models answer analysis or final feedback generation
 - Audio recording
 
 The app requests both microphone and speech recognition permissions before starting the voice interview.
@@ -92,14 +95,18 @@ Rules:
 15. During `.speaking`, `SpeechSynthesisService` speaks `currentQuestionText` aloud and then advances to `.listening`.
 16. During `.listening`, `SpeechTranscriptionService` streams microphone audio into SpeechAnalyzer/SpeechTranscriber, or falls back to `SFSpeechRecognizer`.
 17. `InterviewSessionViewModel` preserves the best full transcript for the current answer across `.listening` and `.paused`.
-18. If transcript activity stops for 3 seconds, the app enters `.paused`; if the user resumes speaking, it returns to `.listening`; if silence continues for 3 more seconds, it enters `.processing`.
-19. The user can also tap `Done Answering` to move directly to `.processing`.
-20. During `.processing`, `AnswerFollowUpService` sends the finalized answer transcript to Foundation Models to decide whether one follow-up is needed.
-21. If a follow-up is needed, `generatedFollowUpQuestion` is spoken aloud; otherwise the app advances to the next primary question.
-22. Follow-up answers move to the next primary question and do not generate another follow-up.
-23. When the interview finishes, the view model sets `shouldShowFeedback = true`.
-24. `InterviewSessionView` calls `onShowFeedback`, and `ContentView` navigates to `.feedback`.
-25. `InterviewFeedbackView` renders `MockHirelogueData.feedback` through the view model.
+18. If transcript activity stops for 3 seconds, the app enters `.paused`; if the user resumes speaking, it returns to `.listening`; if silence continues for 3 more seconds, it stops transcription and enters `.confirm`.
+19. The user can also tap `Done Answering` to stop answer capture and move to `.confirm` without waiting for silence finalization.
+20. During `.confirm`, `InterviewSessionView` shows an editable transcript review card backed by `editableTranscript`.
+21. `Submit Answer` copies the edited transcript into the current answer buffer and moves to `.processing`.
+22. During `.processing`, `AnswerFollowUpService` sends the confirmed answer transcript to Foundation Models to decide whether one follow-up is needed.
+23. If a follow-up is needed, `generatedFollowUpQuestion` is spoken aloud; otherwise the app records an `InterviewAnswer` and advances to the next primary question.
+24. Follow-up answers complete the existing `InterviewAnswer`, move to the next primary question, and do not generate another follow-up.
+25. When the interview finishes, `InterviewFeedbackService` generates structured feedback from the confirmed job profile, generated questions, and bounded answer history.
+26. If feedback generation fails, `MockInterviewFeedbackService` supplies `MockHirelogueData.feedback` and `feedbackGenerationErrorMessage` is shown on the feedback screen.
+27. After feedback exists, the view model sets `shouldShowFeedback = true`.
+28. `InterviewSessionView` calls `onShowFeedback`, and `ContentView` navigates to `.feedback`.
+29. `InterviewFeedbackView` renders `viewModel.feedback`.
 
 ## Major Files
 
@@ -136,12 +143,15 @@ Rules:
   - Presents the voice-interview experience.
   - Shows progress, remaining time, current question, interview phase, and a temporary live transcript validation card.
   - Shows a `Done Answering` button during answer capture and paused warning states.
+  - Shows an editable transcript confirmation card during `.confirm` before answer processing begins.
+  - Shows final feedback-generation progress before navigating to the feedback screen.
   - Provides prototype demo controls for jumping between phases.
   - Confirms before ending the interview.
 
 - `InterviewFeedbackView.swift`
-  - Shows structured mock feedback.
+  - Shows structured generated or fallback feedback.
   - Includes summary, competencies, strengths, improvements, STAR structure, technical reasoning, improved answer, and practice areas.
+  - Shows a fallback notice when Foundation Models feedback generation fails.
   - Handles `Practise Again` and `Back to Home`.
 
 - `SplashScreenView.swift`
@@ -160,14 +170,17 @@ Rules:
 - `InterviewSessionViewModel.swift`
   - Main observable state holder.
   - Uses Swift Observation with `@Observable`.
-  - Owns job input, extracted profile, generated questions, configuration, permission state, interview state, timers, completion state, and feedback fixtures.
+  - Owns job input, extracted profile, generated questions, configuration, permission state, interview state, timers, answer history, completion state, and generated/fallback feedback.
   - Calls `JobAnalysisService` for job-profile extraction and falls back to mock data when needed.
   - Calls `InterviewQuestionService` for primary question generation from the edited profile.
   - Calls `SpeechSynthesisService` during `.speaking` to ask questions aloud.
   - Calls `SpeechTranscriptionService` during `.listening` and `.paused` to capture the user's answer.
-  - Preserves one full answer transcript per turn and sends that transcript to Foundation Models during `.processing`.
+  - Copies stopped answer transcripts into `editableTranscript` during `.confirm` so the user can correct transcription before submission.
+  - Sends the confirmed answer transcript to Foundation Models during `.processing`.
   - Calls `AnswerFollowUpService` to decide whether one generated follow-up should be asked.
-  - Owns silence-based transition logic, the `Done Answering` action, and feedback navigation.
+  - Records each submitted primary answer and optional follow-up answer in `answerHistory`.
+  - Calls `InterviewFeedbackService` after the interview finishes and falls back to mock feedback when needed.
+  - Owns silence-based transition logic, the `Done Answering` action, transcript confirmation, and feedback navigation.
   - Calls `AVAudioApplication.requestRecordPermission()` and `SFSpeechRecognizer.requestAuthorization()` through service boundaries.
 
 ### Services
@@ -192,6 +205,14 @@ Rules:
   - Uses guided generation to return `needsFollowUp`, `reason`, and an optional follow-up question.
   - Keeps the interview bounded to one follow-up per primary question through view-model control flow.
   - Implements `MockAnswerFollowUpService` as a conservative no-follow-up fallback.
+
+- `InterviewFeedbackService.swift`
+  - Defines `InterviewFeedbackService`.
+  - Implements `FoundationModelInterviewFeedbackService` for final structured feedback generation from the confirmed job profile, generated questions, and captured `InterviewAnswer` history.
+  - Uses guided generation to produce the existing `InterviewFeedback` payload in one bounded prompt.
+  - Compacts job-profile fields and answer transcripts before prompting so the request stays within the on-device model context.
+  - Sanitizes generated text so punctuation-only fragments are not rendered as feedback rows.
+  - Implements `MockInterviewFeedbackService` as a deterministic fallback.
 
 - `SpeechSynthesisService.swift`
   - Defines the `SpeechSynthesisService` protocol.
@@ -225,7 +246,7 @@ Rules:
   - Supported mock durations: 5, 10, 15 minutes.
 
 - `InterviewPhase.swift`
-  - Mock session phases: speaking, listening, paused, processing, finished.
+  - Session phases: speaking, listening, paused, confirm, processing, finished.
   - Provides user-facing title, instruction, and status text.
 
 - `JobProfile.swift`
@@ -233,8 +254,12 @@ Rules:
   - Contains position, seniority, responsibilities, qualifications, and competencies.
 
 - `InterviewQuestion.swift`
-  - A planned mock interview question.
-  - Includes kind, prompt text, competency, and optional follow-up.
+  - A planned or generated interview question.
+  - Includes kind, prompt text, competency, and optional fallback follow-up.
+
+- `InterviewAnswer.swift`
+  - Captures the submitted transcript for one primary question.
+  - Stores question identity, kind, competency, question text, primary transcript, and optional follow-up question/transcript.
 
 - `CompetencyAssessment.swift`
   - Feedback tag model with a competency name and assessment note.
@@ -246,7 +271,7 @@ Rules:
   - One part of STAR feedback: Situation, Task, Action, or Result.
 
 - `InterviewFeedback.swift`
-  - Full structured feedback payload shown after the mock interview.
+  - Full structured feedback payload shown after the interview.
 
 ### Configuration
 
@@ -273,8 +298,9 @@ When continuing development:
 - Keep code SwiftUI-native.
 - Keep one file per model.
 - Keep real AI/audio/speech functionality behind service boundaries.
-- Do not add final feedback generation or scoring unless the milestone explicitly asks for it.
+- Do not add scoring beyond the current structured practice feedback unless the milestone explicitly asks for it.
 - The live transcript is currently visible only because it was explicitly requested for transcription validation.
+- Keep transcript editing limited to the `.confirm` phase after transcription has stopped, so live transcription updates do not race with user edits.
 - Prefer adding service types before expanding `InterviewSessionViewModel` too much.
 - Keep `InterviewSessionViewModel` as the single source of truth until there is a real reason to split it.
 - Preserve the app's simple linear navigation flow unless the product scope changes.
@@ -287,8 +313,9 @@ Current services:
 ```text
 Services/
   AnswerFollowUpService.swift
-  JobAnalysisService.swift
+  InterviewFeedbackService.swift
   InterviewQuestionService.swift
+  JobAnalysisService.swift
   SpeechSynthesisService.swift
   SpeechTranscriptionService.swift
 ```
@@ -299,7 +326,6 @@ Suggested future service boundaries:
 Services/
   MicrophonePermissionService.swift
   AnswerAnalysisService.swift
-  FeedbackService.swift
 ```
 
 Do not add future services early unless they remove real complexity.
@@ -315,5 +341,8 @@ Before handing off:
 5. Confirm the active interview cannot be accidentally popped with the default back button.
 6. Confirm microphone permission still has a valid `NSMicrophoneUsageDescription` string.
 7. Confirm speech recognition permission still has a valid `NSSpeechRecognitionUsageDescription` string.
-8. Confirm the transcript shown in the session matches the final transcript printed in the follow-up decision block.
-9. Confirm follow-up generation remains bounded to one follow-up per primary question.
+8. Confirm the live transcript moves to `.confirm` and can be edited before `Submit Answer`.
+9. Confirm the transcript sent to follow-up analysis matches the edited confirmation transcript.
+10. Confirm follow-up generation remains bounded to one follow-up per primary question.
+11. Confirm answer history includes primary transcripts and generated follow-up transcripts when present.
+12. Confirm final feedback generation uses `InterviewFeedbackService` and falls back to mock feedback when Foundation Models is unavailable.

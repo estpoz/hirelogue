@@ -48,13 +48,14 @@ The interview language is fixed to English. The application does not ask the use
 3. SpeechAnalyzer transcribes the user's answer, with `SFSpeechRecognizer` as a fallback if SpeechAnalyzer assets are unavailable.
 4. The current prototype displays the live transcript during the interview only for development validation.
 5. Transcript activity and silence thresholds determine when the user may have finished answering.
-6. The user can tap `Done Answering` to submit without waiting for silence finalization.
-7. Foundation Models analyzes the finalized full-answer transcript for follow-up needs.
-8. The AI interviewer performs one of the following actions:
+6. The user can tap `Done Answering` to stop answer capture without waiting for silence finalization.
+7. After transcription stops, the user reviews and may edit the transcript before submitting the answer.
+8. Foundation Models analyzes the confirmed full-answer transcript for follow-up needs.
+9. The AI interviewer performs one of the following actions:
    - Asks one relevant follow-up question
    - Requests clarification
    - Moves to the next competency or planned question
-9. The next question is presented aloud and the cycle continues until the interview ends.
+10. The next question is presented aloud and the cycle continues until the interview ends.
 
 ### 3.3 Post-Interview Feedback
 
@@ -82,10 +83,11 @@ The core session states are:
 2. **Speaking:** Present an interviewer question through speech synthesis.
 3. **Listening:** Capture and transcribe the user's answer.
 4. **Paused:** Wait briefly to distinguish a natural pause from the end of an answer.
-5. **Processing:** Analyze the answer and determine the next interview action.
-6. **Finished:** End the interview and generate final feedback.
+5. **Confirm:** Stop transcription and let the user edit the captured transcript before submission.
+6. **Processing:** Analyze the confirmed answer and determine the next interview action.
+7. **Finished:** End the interview and generate final feedback.
 
-A 3-second silence threshold moves the session from **Listening** to **Paused**. If the user resumes speaking, the countdown is cancelled and the session returns to **Listening**. If silence continues for 3 more seconds, the answer is finalized and sent to processing. The user can also tap **Done Answering** to finalize immediately.
+A 3-second silence threshold moves the session from **Listening** to **Paused**. If the user resumes speaking, the countdown is cancelled and the session returns to **Listening**. If silence continues for 3 more seconds, transcription stops and the answer moves to **Confirm**. The user can also tap **Done Answering** to move to **Confirm** immediately. Processing begins only after the user submits the confirmed transcript.
 
 ## 5. Responsibility Boundaries
 
@@ -96,6 +98,7 @@ A 3-second silence threshold moves the session from **Listening** to **Paused**.
 - Maximum number of follow-up questions
 - Required competency coverage
 - Session-state transitions
+- Transcript confirmation before answer processing
 - Speech and silence thresholds
 - Audio capture and playback
 - Error, cancellation, and availability handling
@@ -118,6 +121,7 @@ This separation keeps the interview bounded and predictable while still allowing
 - Maximum of one follow-up per primary question
 - Automatic turn-taking through speech and silence detection
 - Temporary live transcript display is allowed during development validation
+- Transcript editing is allowed only after answer capture stops and before submission
 - No interruption while the AI interviewer is speaking
 - No video or camera analysis
 - No facial-expression, emotion, accent, or voice-confidence scoring
