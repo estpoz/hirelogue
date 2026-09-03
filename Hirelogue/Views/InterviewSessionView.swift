@@ -23,6 +23,8 @@ struct InterviewSessionView: View {
     @State private var showEndConfirmation = false
     @State private var showDemoControls = false
 
+    private let shouldShowDemoControlsSection = false
+
     // MARK: - Body
 
     var body: some View {
@@ -322,19 +324,22 @@ struct InterviewSessionView: View {
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                 Spacer()
-                Button {
-                    withAnimation(.snappy) {
-                        showDemoControls.toggle()
+
+                if shouldShowDemoControlsSection {
+                    Button {
+                        withAnimation(.snappy) {
+                            showDemoControls.toggle()
+                        }
+                    } label: {
+                        Label("Demo Controls", systemImage: showDemoControls ? "chevron.down" : "chevron.up")
+                            .font(.footnote)
+                            .foregroundStyle(.tertiary)
                     }
-                } label: {
-                    Label("Demo Controls", systemImage: showDemoControls ? "chevron.down" : "chevron.up")
-                        .font(.footnote)
-                        .foregroundStyle(.tertiary)
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
             }
 
-            if showDemoControls {
+            if shouldShowDemoControlsSection && showDemoControls {
                 VStack(alignment: .leading, spacing: 10) {
                     Text("Prototype only: jump between simulated states.")
                         .font(.footnote)
