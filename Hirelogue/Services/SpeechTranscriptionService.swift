@@ -144,7 +144,10 @@ final class SpeechAnalyzerTranscriptionService: SpeechTranscriptionService {
         contextualTerms = Self.normalizedContextualTerms(from: context.contextualStrings)
 
         do {
-            try await startSpeechAnalyzerTranscription(onTranscriptChange: onTranscriptChange)
+            try await startSpeechAnalyzerTranscription(
+                context: context,
+                onTranscriptChange: onTranscriptChange
+            )
         } catch {
             print("Hirelogue SpeechAnalyzer unavailable, falling back to SFSpeechRecognizer: \(error.localizedDescription)")
             _ = await stopTranscribing()
@@ -196,7 +199,10 @@ final class SpeechAnalyzerTranscriptionService: SpeechTranscriptionService {
     // MARK: - SpeechAnalyzer Path
 
     /// Preferred on-device path. This can fail when SpeechAnalyzer assets are unavailable.
-    private func startSpeechAnalyzerTranscription(onTranscriptChange: @escaping @MainActor (String) -> Void) async throws {
+    private func startSpeechAnalyzerTranscription(
+        context: SpeechTranscriptionContext,
+        onTranscriptChange: @escaping @MainActor (String) -> Void
+    ) async throws {
         let preferredLocale = await SpeechTranscriber.supportedLocale(equivalentTo: Locale(identifier: "en_US"))
         let currentLocale = await SpeechTranscriber.supportedLocale(equivalentTo: Locale.current)
         let locale = preferredLocale ?? currentLocale
@@ -222,6 +228,7 @@ final class SpeechAnalyzerTranscriptionService: SpeechTranscriptionService {
         }
 
         let analyzer = SpeechAnalyzer(modules: [transcriber])
+        try await analyzer.setContext(analysisContext(for: context))
         try await analyzer.prepareToAnalyze(in: analyzerFormat)
         let (inputSequence, inputContinuation) = AsyncStream.makeStream(of: AnalyzerInput.self)
 
@@ -264,6 +271,13 @@ final class SpeechAnalyzerTranscriptionService: SpeechTranscriptionService {
                 print("Hirelogue speech analyzer error: \(error.localizedDescription)")
             }
         }
+    }
+
+    /// Biases SpeechAnalyzer toward role-specific terms such as framework names, competencies, and the current question.
+    private func analysisContext(for context: SpeechTranscriptionContext) -> AnalysisContext {
+        let analysisContext = AnalysisContext()
+        analysisContext.contextualStrings[.general] = context.contextualStrings
+        return analysisContext
     }
 
     // MARK: - Asset Preparation
