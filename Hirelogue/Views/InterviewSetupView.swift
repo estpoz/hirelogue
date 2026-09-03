@@ -44,6 +44,10 @@ struct InterviewSetupView: View {
                                 fallbackNotice(message: questionGenerationErrorMessage)
                             }
 
+                            if let noFeedbackMessage = viewModel.noFeedbackMessage {
+                                noFeedbackNotice(message: noFeedbackMessage)
+                            }
+
                             GroupedCard(
                                 "Job profile",
                                 trailing: AnyView(Button("Edit") { openEditor(with: profile) }.font(.subheadline.weight(.semibold)))
@@ -163,6 +167,22 @@ struct InterviewSetupView: View {
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color.orange.opacity(0.10), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .padding(.horizontal, 16)
+    }
+
+    private func noFeedbackNotice(message: String) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "info.circle.fill")
+                .foregroundStyle(Color.accentColor)
+                .padding(.top, 2)
+            Text(message)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.accentColor.opacity(0.10), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .padding(.horizontal, 16)
     }
 

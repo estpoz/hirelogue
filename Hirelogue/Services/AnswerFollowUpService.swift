@@ -64,6 +64,7 @@ struct FoundationModelAnswerFollowUpService: AnswerFollowUpService {
             instructions: """
             You are an interviewer in an interview practice app.
             Review the candidate's transcribed answer and decide if one follow-up question is needed.
+            The transcript may contain speech-recognition mistakes, so judge the answer's likely intent and completeness rather than isolated odd words.
             Ask a follow-up only when it would materially improve the answer evaluation.
             Do not score the answer, give feedback, or ask more than one follow-up.
             """
@@ -91,6 +92,7 @@ struct FoundationModelAnswerFollowUpService: AnswerFollowUpService {
 
         Decision rules:
         - Return needsFollowUp as true only if the answer is vague, incomplete, missing concrete evidence, missing STAR details, technically unclear, or avoids the competency being assessed.
+        - Do not ask a follow-up only because one word or phrase appears mistranscribed.
         - Return needsFollowUp as false if the answer is already specific enough to continue.
         - If needsFollowUp is true, write one concise interviewer follow-up question.
         - The follow-up must be answer-specific and should not repeat the original question.

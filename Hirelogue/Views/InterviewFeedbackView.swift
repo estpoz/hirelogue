@@ -142,13 +142,21 @@ struct InterviewFeedbackView: View {
                     .font(.footnote.weight(.semibold))
                     .foregroundStyle(.secondary)
                     .textCase(.uppercase)
-                AssessmentTagCloud(assessments: viewModel.feedback.technicalCompetencies)
+                if viewModel.feedback.technicalCompetencies.isEmpty {
+                    emptyFeedbackMessage("No technical competency feedback yet because no technical competencies were available to assess.")
+                } else {
+                    AssessmentTagCloud(assessments: viewModel.feedback.technicalCompetencies)
+                }
                 Text("Behavioral")
                     .font(.footnote.weight(.semibold))
                     .foregroundStyle(.secondary)
                     .textCase(.uppercase)
                     .padding(.top, 4)
-                AssessmentTagCloud(assessments: viewModel.feedback.behavioralCompetencies)
+                if viewModel.feedback.behavioralCompetencies.isEmpty {
+                    emptyFeedbackMessage("No behavioral competency feedback yet because no behavioral competencies were available to assess.")
+                } else {
+                    AssessmentTagCloud(assessments: viewModel.feedback.behavioralCompetencies)
+                }
             }
         }
     }
@@ -157,8 +165,12 @@ struct InterviewFeedbackView: View {
     private var strengthsCard: some View {
         FeedbackCard("Strengths demonstrated") {
             VStack(alignment: .leading, spacing: 14) {
-                ForEach(viewModel.feedback.strengths) { point in
-                    FeedbackPointRow(point: point, symbol: "checkmark.circle.fill", tint: .green)
+                if viewModel.feedback.strengths.isEmpty {
+                    emptyFeedbackMessage("No strengths feedback yet because the submitted answers did not provide enough evidence.")
+                } else {
+                    ForEach(viewModel.feedback.strengths) { point in
+                        FeedbackPointRow(point: point, symbol: "checkmark.circle.fill", tint: .green)
+                    }
                 }
             }
         }
@@ -168,8 +180,12 @@ struct InterviewFeedbackView: View {
     private var improvementsCard: some View {
         FeedbackCard("Areas to improve") {
             VStack(alignment: .leading, spacing: 14) {
-                ForEach(viewModel.feedback.improvements) { point in
-                    FeedbackPointRow(point: point, symbol: "exclamationmark.circle.fill", tint: .orange)
+                if viewModel.feedback.improvements.isEmpty {
+                    emptyFeedbackMessage("No improvement feedback yet because the submitted answers did not provide enough evidence.")
+                } else {
+                    ForEach(viewModel.feedback.improvements) { point in
+                        FeedbackPointRow(point: point, symbol: "exclamationmark.circle.fill", tint: .orange)
+                    }
                 }
             }
         }
@@ -177,28 +193,32 @@ struct InterviewFeedbackView: View {
 
     /// STAR structure breakdown for one behavioral answer.
     private var starCard: some View {
-        FeedbackCard("Answer structure", caption: "Behavioral question: \(viewModel.feedback.starQuestion)") {
+        FeedbackCard("Answer structure", caption: starCardCaption) {
             VStack(alignment: .leading, spacing: 10) {
-                ForEach(viewModel.feedback.starAssessments) { item in
-                    HStack(alignment: .top, spacing: 10) {
-                        Image(systemName: item.present ? "checkmark.circle.fill" : "minus.circle.fill")
-                            .foregroundStyle(item.present ? .green : .orange)
-                            .padding(.top, 2)
-                        VStack(alignment: .leading, spacing: 3) {
-                            HStack(alignment: .firstTextBaseline) {
-                                Text(item.label)
-                                    .font(.subheadline.weight(.semibold))
-                                Text(item.present ? "Present" : "Needs improvement")
-                                    .font(.caption)
+                if viewModel.feedback.starAssessments.isEmpty {
+                    emptyFeedbackMessage("No STAR feedback yet because no behavioral answer was submitted.")
+                } else {
+                    ForEach(viewModel.feedback.starAssessments) { item in
+                        HStack(alignment: .top, spacing: 10) {
+                            Image(systemName: item.present ? "checkmark.circle.fill" : "minus.circle.fill")
+                                .foregroundStyle(item.present ? .green : .secondary)
+                                .padding(.top, 2)
+                            VStack(alignment: .leading, spacing: 3) {
+                                HStack(alignment: .firstTextBaseline) {
+                                    Text(item.label)
+                                        .font(.subheadline.weight(.semibold))
+                                    Text(item.present ? "Present" : "Needs improvement")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Text(item.note)
+                                    .font(.footnote)
                                     .foregroundStyle(.secondary)
                             }
-                            Text(item.note)
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
                         }
+                        .padding(10)
+                        .background(Color(.systemGroupedBackground), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                     }
-                    .padding(10)
-                    .background(Color(.systemGroupedBackground), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                 }
             }
         }
@@ -208,13 +228,17 @@ struct InterviewFeedbackView: View {
     private var technicalReasoningCard: some View {
         FeedbackCard("Technical reasoning", caption: "How clearly you explained your technical decisions.") {
             VStack(alignment: .leading, spacing: 10) {
-                ForEach(viewModel.feedback.technicalReasoning, id: \.self) { line in
-                    HStack(alignment: .top, spacing: 10) {
-                        Image(systemName: "arrow.right.circle.fill")
-                            .foregroundStyle(Color.accentColor)
-                            .padding(.top, 2)
-                        Text(line)
-                            .font(.subheadline)
+                if viewModel.feedback.technicalReasoning.isEmpty {
+                    emptyFeedbackMessage("No technical reasoning feedback yet because no technical answer was submitted.")
+                } else {
+                    ForEach(viewModel.feedback.technicalReasoning, id: \.self) { line in
+                        HStack(alignment: .top, spacing: 10) {
+                            Image(systemName: "arrow.right.circle.fill")
+                                .foregroundStyle(Color.accentColor)
+                                .padding(.top, 2)
+                            Text(line)
+                                .font(.subheadline)
+                        }
                     }
                 }
             }
@@ -223,17 +247,21 @@ struct InterviewFeedbackView: View {
 
     /// Example of a more structured answer for one technical question.
     private var improvedAnswerCard: some View {
-        FeedbackCard("Suggested improvement", caption: "Example formulation - \(viewModel.feedback.improvedAnswerQuestion)") {
+        FeedbackCard("Suggested improvement", caption: improvedAnswerCaption) {
             VStack(alignment: .leading, spacing: 8) {
-                Text("One possible stronger answer")
-                    .font(.footnote.weight(.semibold))
-                    .foregroundStyle(Color.accentColor)
-                Text(viewModel.feedback.improvedAnswer)
-                    .font(.subheadline)
-                    .fixedSize(horizontal: false, vertical: true)
-                Text("This is an example of structure, not an answer to memorise. Use your own experience.")
-                    .font(.footnote)
-                    .foregroundStyle(.tertiary)
+                if viewModel.feedback.improvedAnswer.isEmpty {
+                    emptyFeedbackMessage("No suggested improvement yet because there was not enough answer content to rewrite.")
+                } else {
+                    Text("One possible stronger answer")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(Color.accentColor)
+                    Text(viewModel.feedback.improvedAnswer)
+                        .font(.subheadline)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text("This is an example of structure, not an answer to memorise. Use your own experience.")
+                        .font(.footnote)
+                        .foregroundStyle(.tertiary)
+                }
             }
             .padding(12)
             .background(Color.accentColor.opacity(0.10), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
@@ -244,19 +272,46 @@ struct InterviewFeedbackView: View {
     private var practiceAreasCard: some View {
         FeedbackCard("Recommended practice areas") {
             VStack(alignment: .leading, spacing: 12) {
-                ForEach(Array(viewModel.feedback.recommendations.enumerated()), id: \.offset) { index, recommendation in
-                    HStack(alignment: .top, spacing: 10) {
-                        Text("\(index + 1)")
-                            .font(.caption.weight(.bold))
-                            .foregroundStyle(Color.accentColor)
-                            .frame(width: 24, height: 24)
-                            .background(Color.accentColor.opacity(0.12), in: Circle())
-                        Text(recommendation)
-                            .font(.subheadline)
+                if viewModel.feedback.recommendations.isEmpty {
+                    emptyFeedbackMessage("No practice recommendations yet because there was not enough feedback evidence.")
+                } else {
+                    ForEach(Array(viewModel.feedback.recommendations.enumerated()), id: \.offset) { index, recommendation in
+                        HStack(alignment: .top, spacing: 10) {
+                            Text("\(index + 1)")
+                                .font(.caption.weight(.bold))
+                                .foregroundStyle(Color.accentColor)
+                                .frame(width: 24, height: 24)
+                                .background(Color.accentColor.opacity(0.12), in: Circle())
+                            Text(recommendation)
+                                .font(.subheadline)
+                        }
                     }
                 }
             }
         }
+    }
+
+    private func emptyFeedbackMessage(_ message: String) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "info.circle.fill")
+                .foregroundStyle(.secondary)
+                .padding(.top, 2)
+            Text(message)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(.systemGroupedBackground), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+
+    private var starCardCaption: String? {
+        viewModel.feedback.starQuestion.isEmpty ? nil : "Behavioral question: \(viewModel.feedback.starQuestion)"
+    }
+
+    private var improvedAnswerCaption: String? {
+        viewModel.feedback.improvedAnswerQuestion.isEmpty ? nil : "Example formulation - \(viewModel.feedback.improvedAnswerQuestion)"
     }
 }
 
