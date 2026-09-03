@@ -45,6 +45,9 @@ struct FoundationModelInterviewFeedbackService: InterviewFeedbackService {
             instructions: """
             You create evidence-based English practice interview feedback.
             Use only the supplied job profile, interview questions, and transcripts.
+            Treat transcripts as speech-recognition output that may contain occasional incorrect words.
+            Assess the exact technical and behavioral competency names supplied in the job profile. Do not invent, rename, or duplicate competencies across sections.
+            For STAR assessment, the present value must agree with the note. If the note says the element is missing, unclear, not specific, or not provided, present must be false.
             Do not predict hiring outcomes, evaluate accent, infer emotion, use resume details, or add external company research.
             Keep every field concise and actionable for one mobile feedback screen.
             """
@@ -72,10 +75,13 @@ struct FoundationModelInterviewFeedbackService: InterviewFeedbackService {
 
         Output requirements:
         - Summary: 2 to 3 sentences, practice-focused, no hiring prediction.
-        - Competencies: include assessed technical and behavioral competencies from the profile or questions only.
+        - Technical competencies: assess only these exact names: \(boundedJoined(profile.technicalCompetencies, limit: 8)).
+        - Behavioral competencies: assess only these exact names: \(boundedJoined(profile.behavioralCompetencies, limit: 6)).
+        - Competency notes must use one of: Clearly explained, Partly explained, Not covered.
         - Strengths: 2 to 3 items with transcript-grounded details.
         - Improvements: 2 to 3 items with specific next-action details.
-        - STAR: evaluate one behavioral answer when available; otherwise mark missing parts as needs improvement.
+        - Do not penalize wording, grammar, or isolated strange terms that could be speech-recognition artifacts.
+        - STAR: return exactly Situation, Task, Action, and Result. Mark present false when the transcript lacks a specific element.
         - Technical reasoning: 2 to 3 concise notes about clarity, trade-offs, assumptions, or depth.
         - Suggested improvement: rewrite one selected answer as a stronger example formulation.
         - Recommendations: exactly 3 practice areas.
@@ -85,7 +91,7 @@ struct FoundationModelInterviewFeedbackService: InterviewFeedbackService {
             to: prompt,
             generating: GeneratedInterviewFeedback.self
         )
-        return response.content.interviewFeedback
+        return response.content.interviewFeedback(for: profile, answers: answers)
 #else
         throw InterviewFeedbackGenerationError.foundationModelsNotLinked
 #endif
@@ -135,7 +141,7 @@ struct FoundationModelInterviewFeedbackService: InterviewFeedbackService {
 
 // MARK: - Prototype Fallback
 
-/// Deterministic fallback that keeps the final screen available when Foundation Models feedback generation fails.
+/// Deterministic fallback that avoids showing mock examples as if they came from the user's answers.
 struct MockInterviewFeedbackService: InterviewFeedbackService {
     nonisolated init() {}
 
@@ -146,7 +152,23 @@ struct MockInterviewFeedbackService: InterviewFeedbackService {
         interviewType: InterviewType,
         duration: InterviewDuration
     ) async throws -> InterviewFeedback {
-        MockHirelogueData.feedback
+        guard !answers.isEmpty else {
+            throw InterviewFeedbackGenerationError.emptyAnswerHistory
+        }
+
+        return InterviewFeedback(
+            summary: "No generated feedback yet because Foundation Models could not complete the review for this session.",
+            technicalCompetencies: [],
+            behavioralCompetencies: [],
+            strengths: [],
+            improvements: [],
+            starQuestion: "",
+            starAssessments: [],
+            technicalReasoning: [],
+            improvedAnswerQuestion: "",
+            improvedAnswer: "",
+            recommendations: []
+        )
     }
 }
 
@@ -208,28 +230,65 @@ private struct GeneratedInterviewFeedback {
     @Guide(description: "Exactly three recommended practice areas", .minimumCount(3), .maximumCount(3))
     var recommendations: [String]
 
-    var interviewFeedback: InterviewFeedback {
+    func interviewFeedback(for profile: JobProfile, answers: [InterviewAnswer]) -> InterviewFeedback {
         InterviewFeedback(
             summary: clean(summary, fallback: "Your interview answers were reviewed against the role requirements. Use the notes below as practice feedback, not as a hiring prediction."),
-            technicalCompetencies: technicalCompetencies.compactMap(\.competencyAssessment),
-            behavioralCompetencies: behavioralCompetencies.compactMap(\.competencyAssessment),
+            technicalCompetencies: repairedCompetencies(
+                generated: technicalCompetencies,
+                allowedNames: profile.technicalCompetencies
+            ),
+            behavioralCompetencies: repairedCompetencies(
+                generated: behavioralCompetencies,
+                allowedNames: profile.behavioralCompetencies
+            ),
             strengths: strengths.compactMap(\.feedbackPoint),
             improvements: improvements.compactMap(\.feedbackPoint),
             starQuestion: clean(starQuestion, fallback: "Behavioral answer"),
-            starAssessments: normalizedSTARAssessments,
-            technicalReasoning: cleanedList(technicalReasoning, fallback: ["Add more detail about constraints, trade-offs, and outcomes in technical answers."]),
-            improvedAnswerQuestion: clean(improvedAnswerQuestion, fallback: "Selected answer"),
-            improvedAnswer: clean(improvedAnswer, fallback: "A stronger answer should name the context, explain the decision, describe the action taken, and close with the result."),
-            recommendations: Array(cleanedList(recommendations, fallback: MockHirelogueData.feedback.recommendations).prefix(3))
+            starAssessments: hasBehavioralAnswer(in: answers) ? repairedSTARAssessments : [],
+            technicalReasoning: cleanedList(technicalReasoning, fallback: []),
+            improvedAnswerQuestion: validGeneratedText(improvedAnswerQuestion) ?? "",
+            improvedAnswer: validGeneratedText(improvedAnswer) ?? "",
+            recommendations: Array(cleanedList(recommendations, fallback: []).prefix(3))
         )
     }
 
-    private var normalizedSTARAssessments: [STARAssessment] {
-        let generated = starAssessments.compactMap(\.starAssessment)
-        guard generated.count == 4 else {
-            return MockHirelogueData.feedback.starAssessments
+    private func repairedCompetencies(
+        generated: [GeneratedCompetencyAssessment],
+        allowedNames: [String]
+    ) -> [CompetencyAssessment] {
+        let cleanedAllowedNames = allowedNames.compactMap(validGeneratedText)
+        guard !cleanedAllowedNames.isEmpty else { return [] }
+
+        return cleanedAllowedNames.map { allowedName in
+            let generatedAssessment = generated.first { assessment in
+                namesMatch(generatedName: assessment.name, allowedName: allowedName)
+            }
+            let note = normalizedCompetencyNote(generatedAssessment?.note)
+            return CompetencyAssessment(name: allowedName, note: note)
         }
-        return generated
+    }
+
+    private var repairedSTARAssessments: [STARAssessment] {
+        let generated = starAssessments.compactMap(\.starAssessment)
+        let requiredLabels = ["Situation", "Task", "Action", "Result"]
+
+        return requiredLabels.map { label in
+            guard let assessment = generated.first(where: { namesMatch(generatedName: $0.label, allowedName: label) }) else {
+                return STARAssessment(
+                    label: label,
+                    present: false,
+                    note: "\(label) was not clearly covered in the transcript."
+                )
+            }
+
+            let note = clean(assessment.note, fallback: "\(label) was not clearly covered in the transcript.")
+            let present = assessment.present && !noteImpliesMissingSTARDetail(note)
+            return STARAssessment(
+                label: label,
+                present: present,
+                note: note
+            )
+        }
     }
 
     private func cleanedList(_ items: [String], fallback: [String]) -> [String] {
@@ -240,6 +299,72 @@ private struct GeneratedInterviewFeedback {
 
     private func clean(_ value: String, fallback: String) -> String {
         validGeneratedText(value) ?? fallback
+    }
+
+    private func hasBehavioralAnswer(in answers: [InterviewAnswer]) -> Bool {
+        answers.contains { $0.questionKind == .behavioral }
+    }
+
+    private func namesMatch(generatedName: String, allowedName: String) -> Bool {
+        let generated = normalizedName(generatedName)
+        let allowed = normalizedName(allowedName)
+        guard !generated.isEmpty, !allowed.isEmpty else { return false }
+        return generated == allowed || generated.contains(allowed) || allowed.contains(generated)
+    }
+
+    private func normalizedName(_ value: String) -> String {
+        value
+            .lowercased()
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+    }
+
+    private func normalizedCompetencyNote(_ note: String?) -> String {
+        guard let note = note?.lowercased() else { return "Not covered" }
+
+        if note.contains("not covered")
+            || note.contains("not mentioned")
+            || note.contains("not discussed")
+            || note.contains("no evidence")
+            || note.contains("missing")
+            || note.contains("did not") {
+            return "Not covered"
+        }
+
+        if note.contains("partly")
+            || note.contains("partial")
+            || note.contains("some")
+            || note.contains("limited")
+            || note.contains("unclear")
+            || note.contains("needs") {
+            return "Partly explained"
+        }
+
+        if note.contains("clear")
+            || note.contains("covered")
+            || note.contains("explained")
+            || note.contains("specific")
+            || note.contains("strong") {
+            return "Clearly explained"
+        }
+
+        return "Partly explained"
+    }
+
+    private func noteImpliesMissingSTARDetail(_ note: String) -> Bool {
+        let normalizedNote = note.lowercased()
+        return normalizedNote.contains("not provide")
+            || normalizedNote.contains("not provided")
+            || normalizedNote.contains("did not")
+            || normalizedNote.contains("missing")
+            || normalizedNote.contains("lacks")
+            || normalizedNote.contains("lack ")
+            || normalizedNote.contains("unclear")
+            || normalizedNote.contains("not clearly")
+            || normalizedNote.contains("no specific")
+            || normalizedNote.contains("without specific")
+            || normalizedNote.contains("needs improvement")
     }
 
 }

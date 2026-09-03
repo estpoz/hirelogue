@@ -41,6 +41,8 @@ final class InterviewSessionViewModel {
     var isGeneratingFeedback = false
     /// Non-nil when final feedback falls back to prototype feedback.
     var feedbackGenerationErrorMessage: String?
+    /// Non-nil when the session ends without enough submitted content to create feedback.
+    var noFeedbackMessage: String?
 
     // MARK: - Interview Session State
 
@@ -51,6 +53,7 @@ final class InterviewSessionViewModel {
     var secondsRemaining = InterviewDuration.ten.rawValue * 60
     var completed = false
     var shouldShowFeedback = false
+    var shouldReturnToSetup = false
     /// Temporary validation surface: shows what SpeechAnalyzer hears while the candidate answers.
     var liveTranscript = ""
     /// Editable copy of the stopped transcript that the user reviews before submission.
@@ -344,6 +347,7 @@ final class InterviewSessionViewModel {
         generatedFollowUpQuestion = nil
         followUpGenerationErrorMessage = nil
         feedbackGenerationErrorMessage = nil
+        noFeedbackMessage = nil
         isGeneratingFeedback = false
         answerHistory = []
         feedback = MockHirelogueData.feedback
@@ -351,6 +355,7 @@ final class InterviewSessionViewModel {
         secondsRemaining = duration.rawValue * 60
         completed = false
         shouldShowFeedback = false
+        shouldReturnToSetup = false
         resetCurrentAnswerTranscript()
         startRemainingTimeTimer()
         schedulePhaseTransition()
@@ -425,12 +430,14 @@ final class InterviewSessionViewModel {
     func practiseAgain() {
         completed = false
         shouldShowFeedback = false
+        shouldReturnToSetup = false
         cancelInterviewTasks()
         phase = .speaking
         questionIndex = 0
         isFollowUp = false
         generatedFollowUpQuestion = nil
         feedbackGenerationErrorMessage = nil
+        noFeedbackMessage = nil
         isGeneratingFeedback = false
         answerHistory = []
         feedback = MockHirelogueData.feedback
@@ -457,6 +464,7 @@ final class InterviewSessionViewModel {
         transcriptionErrorMessage = nil
         followUpGenerationErrorMessage = nil
         feedbackGenerationErrorMessage = nil
+        noFeedbackMessage = nil
         isGeneratingFeedback = false
         generatedFollowUpQuestion = nil
         answerHistory = []
@@ -469,6 +477,7 @@ final class InterviewSessionViewModel {
         secondsRemaining = InterviewDuration.ten.rawValue * 60
         completed = false
         shouldShowFeedback = false
+        shouldReturnToSetup = false
     }
 
     // MARK: - Timers and Phase Machine
@@ -588,7 +597,14 @@ final class InterviewSessionViewModel {
         lastTranscriptActivityDate = Date()
 
         do {
-            try await speechTranscriptionService.startTranscribing { [weak self] (partialTranscript: String) in
+            let context = SpeechTranscriptionContext(
+                jobProfile: jobProfile,
+                question: currentQuestion,
+                promptText: currentQuestionText,
+                isFollowUp: isFollowUp
+            )
+
+            try await speechTranscriptionService.startTranscribing(context: context) { [weak self] (partialTranscript: String) in
                 guard let self else { return }
                 let didUpdateTranscript = mergePartialTranscript(partialTranscript)
 
@@ -624,7 +640,7 @@ final class InterviewSessionViewModel {
         }
     }
 
-    /// Preserves the best full-session transcript while ignoring empty, shorter, or duplicate recognizer revisions.
+    /// Preserves the most recent meaningful recognizer revision while ignoring empty or duplicate text.
     private func mergePartialTranscript(_ partialTranscript: String) -> Bool {
         let cleanedPartial = normalizedTranscript(partialTranscript)
         guard !cleanedPartial.isEmpty else { return false }
@@ -640,14 +656,14 @@ final class InterviewSessionViewModel {
             return false
         }
 
-        if cleanedPartial.count >= bestPartialTranscript.count && cleanedPartial.hasPrefix(bestPartialTranscript) {
+        if cleanedPartial.hasPrefix(bestPartialTranscript) || bestPartialTranscript.hasPrefix(cleanedPartial) {
             bestPartialTranscript = cleanedPartial
             currentAnswerTranscript = cleanedPartial
             liveTranscript = currentAnswerTranscript
             return true
         }
 
-        if cleanedPartial.count > currentAnswerTranscript.count && cleanedPartial.hasPrefix(currentAnswerTranscript) {
+        if cleanedPartial.hasPrefix(currentAnswerTranscript) || currentAnswerTranscript.hasPrefix(cleanedPartial) {
             currentAnswerTranscript = cleanedPartial
             bestPartialTranscript = cleanedPartial
             liveTranscript = currentAnswerTranscript
@@ -658,14 +674,14 @@ final class InterviewSessionViewModel {
             return false
         }
 
-        if cleanedPartial.count > currentAnswerTranscript.count {
-            currentAnswerTranscript = cleanedPartial
-            bestPartialTranscript = cleanedPartial
-            liveTranscript = currentAnswerTranscript
-            return true
+        if cleanedPartial.count < currentAnswerTranscript.count / 2 {
+            return false
         }
 
-        return false
+        currentAnswerTranscript = cleanedPartial
+        bestPartialTranscript = cleanedPartial
+        liveTranscript = currentAnswerTranscript
+        return true
     }
 
     /// Collapses whitespace so transcript comparisons are stable across recognizer updates.
@@ -813,6 +829,17 @@ final class InterviewSessionViewModel {
             return
         }
 
+        let submittedAnswers = answerHistory.filter { hasCapturedTranscript($0) }
+        guard !submittedAnswers.isEmpty else {
+            feedbackGenerationErrorMessage = nil
+            noFeedbackMessage = "No feedback yet because no answers were submitted. Start another interview and submit at least one answer to generate feedback."
+            isGeneratingFeedback = false
+            completed = true
+            shouldShowFeedback = false
+            shouldReturnToSetup = true
+            return
+        }
+
         isGeneratingFeedback = true
         feedbackGenerationErrorMessage = nil
 
@@ -820,7 +847,7 @@ final class InterviewSessionViewModel {
             feedback = try await interviewFeedbackService.generateFeedback(
                 for: profile,
                 questions: questions,
-                answers: answerHistory,
+                answers: submittedAnswers,
                 interviewType: interviewType,
                 duration: duration
             )
@@ -829,7 +856,7 @@ final class InterviewSessionViewModel {
             feedback = (try? await fallbackInterviewFeedbackService.generateFeedback(
                 for: profile,
                 questions: questions,
-                answers: answerHistory,
+                answers: submittedAnswers,
                 interviewType: interviewType,
                 duration: duration
             )) ?? MockHirelogueData.feedback
@@ -840,6 +867,16 @@ final class InterviewSessionViewModel {
         isGeneratingFeedback = false
         completed = true
         shouldShowFeedback = true
+    }
+
+    private func hasCapturedTranscript(_ answer: InterviewAnswer) -> Bool {
+        isCapturedTranscript(answer.primaryTranscript) || isCapturedTranscript(answer.followUpTranscript)
+    }
+
+    private func isCapturedTranscript(_ transcript: String?) -> Bool {
+        guard let transcript else { return false }
+        let cleanedTranscript = normalizedTranscript(transcript)
+        return !cleanedTranscript.isEmpty && !cleanedTranscript.hasPrefix("[No ")
     }
 
     /// Prints a compact feedback-generation summary for development validation.

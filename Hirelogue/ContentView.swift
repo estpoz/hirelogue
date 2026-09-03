@@ -33,6 +33,7 @@ struct ContentView: View {
                         InterviewSessionView(
                             viewModel: viewModel,
                             onShowFeedback: { showFeedback() },
+                            onReturnToSetup: { path = [.setup] },
                             onGoHome: { path = [] }
                         )
                     case .feedback:

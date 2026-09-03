@@ -275,7 +275,7 @@ struct AssessmentTagCloud: View {
         case "Clearly explained":
             return .green
         case "Partly explained":
-            return .orange
+            return .yellow
         case "Not covered":
             return .secondary
         default:

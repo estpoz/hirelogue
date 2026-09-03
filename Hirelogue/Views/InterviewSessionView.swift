@@ -12,6 +12,9 @@ struct InterviewSessionView: View {
     /// Called when the interview ends naturally or through the confirmation dialog.
     let onShowFeedback: () -> Void
 
+    /// Called when the interview ends without submitted answers.
+    let onReturnToSetup: () -> Void
+
     /// Called only for the fallback empty state.
     let onGoHome: () -> Void
 
@@ -56,6 +59,11 @@ struct InterviewSessionView: View {
                 .onChange(of: viewModel.shouldShowFeedback) { _, shouldShow in
                     if shouldShow {
                         onShowFeedback()
+                    }
+                }
+                .onChange(of: viewModel.shouldReturnToSetup) { _, shouldReturn in
+                    if shouldReturn {
+                        onReturnToSetup()
                     }
                 }
             }
@@ -368,6 +376,6 @@ struct InterviewSessionView: View {
     viewModel.jobProfile = MockHirelogueData.jobProfile
     viewModel.startInterview()
     return NavigationStack {
-        InterviewSessionView(viewModel: viewModel, onShowFeedback: {}, onGoHome: {})
+        InterviewSessionView(viewModel: viewModel, onShowFeedback: {}, onReturnToSetup: {}, onGoHome: {})
     }
 }
