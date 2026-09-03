@@ -47,6 +47,9 @@ struct FoundationModelInterviewFeedbackService: InterviewFeedbackService {
             Use only the supplied job profile, interview questions, and transcripts.
             Treat transcripts as speech-recognition output that may contain occasional incorrect words.
             Assess the exact technical and behavioral competency names supplied in the job profile. Do not invent, rename, or duplicate competencies across sections.
+            Treat competency assessments as the source of truth for all later feedback sections.
+            Do not write a positive technical reasoning note for a competency marked Not covered.
+            Mention Not covered competencies only as gaps or recommended practice areas.
             For STAR assessment, the present value must agree with the note. If the note says the element is missing, unclear, not specific, or not provided, present must be false.
             Do not predict hiring outcomes, evaluate accent, infer emotion, use resume details, or add external company research.
             Keep every field concise and actionable for one mobile feedback screen.
@@ -82,7 +85,7 @@ struct FoundationModelInterviewFeedbackService: InterviewFeedbackService {
         - Improvements: 2 to 3 items with specific next-action details.
         - Do not penalize wording, grammar, or isolated strange terms that could be speech-recognition artifacts.
         - STAR: return exactly Situation, Task, Action, and Result. Mark present false when the transcript lacks a specific element.
-        - Technical reasoning: 2 to 3 concise notes about clarity, trade-offs, assumptions, or depth.
+        - Technical reasoning: 2 to 3 concise notes about clarity, trade-offs, assumptions, or depth. Each positive claim must be supported by submitted answer evidence and must not contradict the competency notes.
         - Suggested improvement: rewrite one selected answer as a stronger example formulation.
         - Recommendations: exactly 3 practice areas.
         """
@@ -231,21 +234,28 @@ private struct GeneratedInterviewFeedback {
     var recommendations: [String]
 
     func interviewFeedback(for profile: JobProfile, answers: [InterviewAnswer]) -> InterviewFeedback {
-        InterviewFeedback(
+        let repairedTechnicalCompetencies = repairedCompetencies(
+            generated: technicalCompetencies,
+            allowedNames: profile.technicalCompetencies
+        )
+        let repairedBehavioralCompetencies = repairedCompetencies(
+            generated: behavioralCompetencies,
+            allowedNames: profile.behavioralCompetencies
+        )
+        let repairedTechnicalReasoning = consistencyCheckedTechnicalReasoning(
+            cleanedList(technicalReasoning, fallback: []),
+            technicalCompetencies: repairedTechnicalCompetencies
+        )
+
+        return InterviewFeedback(
             summary: clean(summary, fallback: "Your interview answers were reviewed against the role requirements. Use the notes below as practice feedback, not as a hiring prediction."),
-            technicalCompetencies: repairedCompetencies(
-                generated: technicalCompetencies,
-                allowedNames: profile.technicalCompetencies
-            ),
-            behavioralCompetencies: repairedCompetencies(
-                generated: behavioralCompetencies,
-                allowedNames: profile.behavioralCompetencies
-            ),
+            technicalCompetencies: repairedTechnicalCompetencies,
+            behavioralCompetencies: repairedBehavioralCompetencies,
             strengths: strengths.compactMap(\.feedbackPoint),
             improvements: improvements.compactMap(\.feedbackPoint),
             starQuestion: clean(starQuestion, fallback: "Behavioral answer"),
             starAssessments: hasBehavioralAnswer(in: answers) ? repairedSTARAssessments : [],
-            technicalReasoning: cleanedList(technicalReasoning, fallback: []),
+            technicalReasoning: repairedTechnicalReasoning,
             improvedAnswerQuestion: validGeneratedText(improvedAnswerQuestion) ?? "",
             improvedAnswer: validGeneratedText(improvedAnswer) ?? "",
             recommendations: Array(cleanedList(recommendations, fallback: []).prefix(3))
@@ -350,6 +360,43 @@ private struct GeneratedInterviewFeedback {
         }
 
         return "Partly explained"
+    }
+
+    private func consistencyCheckedTechnicalReasoning(
+        _ notes: [String],
+        technicalCompetencies: [CompetencyAssessment]
+    ) -> [String] {
+        notes.filter { note in
+            !positivelyClaimsNotCoveredCompetency(
+                in: note,
+                technicalCompetencies: technicalCompetencies
+            )
+        }
+    }
+
+    private func positivelyClaimsNotCoveredCompetency(
+        in note: String,
+        technicalCompetencies: [CompetencyAssessment]
+    ) -> Bool {
+        guard noteHasPositiveAssessmentLanguage(note) else { return false }
+
+        return technicalCompetencies.contains { assessment in
+            assessment.note == "Not covered" && namesMatch(
+                generatedName: note,
+                allowedName: assessment.name
+            )
+        }
+    }
+
+    private func noteHasPositiveAssessmentLanguage(_ note: String) -> Bool {
+        let normalizedNote = note.lowercased()
+        return normalizedNote.contains("clear")
+            || normalizedNote.contains("good")
+            || normalizedNote.contains("strong")
+            || normalizedNote.contains("demonstrated")
+            || normalizedNote.contains("explained")
+            || normalizedNote.contains("understanding")
+            || normalizedNote.contains("well")
     }
 
     private func noteImpliesMissingSTARDetail(_ note: String) -> Bool {
